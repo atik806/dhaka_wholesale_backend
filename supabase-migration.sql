@@ -56,7 +56,27 @@ CREATE TRIGGER review_rating_update
   AFTER INSERT OR UPDATE OR DELETE ON reviews
   FOR EACH ROW EXECUTE FUNCTION recalc_product_rating();
 
--- 6. Denormalized product_count on categories via trigger
+-- 6. Contact messages table
+CREATE TABLE IF NOT EXISTS contact_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  first_name TEXT NOT NULL,
+  last_name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  message TEXT NOT NULL,
+  is_read BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE contact_messages ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Anyone can insert contact messages" ON contact_messages
+  FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "Admin can view contact messages" ON contact_messages
+  FOR SELECT USING (auth.role() = 'service_role');
+
+-- 7. Denormalized product_count on categories via trigger
 CREATE OR REPLACE FUNCTION update_category_product_count()
 RETURNS TRIGGER AS $$
 BEGIN

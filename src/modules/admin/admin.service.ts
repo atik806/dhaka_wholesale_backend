@@ -272,6 +272,43 @@ export class AdminService {
     return { message: 'Review deleted successfully' };
   }
 
+  async findAllContactMessages(query: { page?: number; limit?: number }) {
+    const page = query.page || 1;
+    const limit = query.limit || 20;
+    const offset = (page - 1) * limit;
+
+    const { data, error, count } = await this.supabase
+      .from('contact_messages')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (error) throw new InternalServerErrorException(error.message);
+
+    return {
+      data: data || [],
+      meta: {
+        total: count || 0,
+        page,
+        limit,
+        totalPages: Math.ceil((count || 0) / limit),
+      },
+    };
+  }
+
+  async markContactMessageRead(id: string) {
+    const { data, error } = await this.supabase
+      .from('contact_messages')
+      .update({ is_read: true })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw new InternalServerErrorException(error.message);
+    if (!data) throw new NotFoundException('Message not found');
+    return data;
+  }
+
   private async updateProductRating(productId: string) {
     const { data: stats } = await this.supabase
       .from('reviews')

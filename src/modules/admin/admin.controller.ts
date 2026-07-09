@@ -178,4 +178,28 @@ export class AdminController {
   async deleteReview(@Param('id') id: string) {
     return this.adminService.deleteReview(id);
   }
+
+  @Get('contact-messages')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get all contact messages with pagination' })
+  async findAllContactMessages(
+    @Query(new ZodValidationPipe(PaginationQuerySchema))
+    query: {
+      page?: number;
+      limit?: number;
+    },
+  ) {
+    return this.adminService.findAllContactMessages(query);
+  }
+
+  @Patch('contact-messages/:id/read')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Mark contact message as read' })
+  async markContactMessageRead(@Param('id') id: string) {
+    return this.adminService.markContactMessageRead(id);
+  }
 }
