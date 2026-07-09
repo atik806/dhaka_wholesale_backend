@@ -18,16 +18,19 @@ Create a `.env` file in the root directory with the following variables:
 ```env
 # Supabase Configuration
 SUPABASE_URL=your_supabase_project_url
-SUPABASE_KEY=your_supabase_anonymous_key
-SUPABASE_SERVICE_KEY=your_supabase_service_role_key
+SUPABASE_ANON_KEY=your_supabase_anonymous_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 
-# JWT Configuration
-JWT_SECRET=your_jwt_secret_key
-JWT_EXPIRES_IN=24h
+# Admin credentials
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=your-strong-admin-password
 
 # Server Configuration
-PORT=3000
+PORT=5000
 NODE_ENV=development
+
+# Frontend origin(s) allowed to call the API
+CORS_ORIGIN=http://localhost:3000,http://localhost:3001
 ```
 
 ### 3. Database Setup
@@ -66,7 +69,29 @@ npm run build
 
 ### Start Production Server
 ```bash
-npm start
+npm run start:prod
+```
+
+## Production Deployment
+
+Use these environment values in production:
+
+```env
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=your-strong-admin-password
+PORT=5000
+NODE_ENV=production
+CORS_ORIGIN=https://yourdomain.com
+```
+
+Deploy flow:
+
+```bash
+npm run build
+npm run start:prod
 ```
 
 ## Project Structure
