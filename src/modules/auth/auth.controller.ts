@@ -43,6 +43,7 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Refresh access token using refresh token' })
   async refreshToken(
     @Body(new ZodValidationPipe(RefreshTokenSchema)) dto: RefreshTokenDto,
