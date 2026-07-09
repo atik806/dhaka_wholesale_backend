@@ -1,5 +1,6 @@
 import { Controller, Post, Get, Patch, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service.js';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
@@ -7,6 +8,7 @@ import type { JwtUser } from '../../common/decorators/current-user.decorator.js'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
 import { RegisterSchema, type RegisterDto } from './dto/register.dto.js';
 import { LoginSchema, type LoginDto } from './dto/login.dto.js';
+import { RefreshTokenSchema, type RefreshTokenDto } from './dto/refresh-token.dto.js';
 import {
   UpdateProfileSchema,
   type UpdateProfileDto,
@@ -18,6 +20,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Register a new user' })
   async register(
     @Body(new ZodValidationPipe(RegisterSchema)) dto: RegisterDto,
@@ -26,9 +29,25 @@ export class AuthController {
   }
 
   @Post('login')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Login with email and password' })
   async login(@Body(new ZodValidationPipe(LoginSchema)) dto: LoginDto) {
     return this.authService.login(dto);
+  }
+
+  @Post('admin-login')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({ summary: 'Admin login with credentials from .env' })
+  async adminLogin(@Body(new ZodValidationPipe(LoginSchema)) dto: LoginDto) {
+    return this.authService.adminLogin(dto);
+  }
+
+  @Post('refresh')
+  @ApiOperation({ summary: 'Refresh access token using refresh token' })
+  async refreshToken(
+    @Body(new ZodValidationPipe(RefreshTokenSchema)) dto: RefreshTokenDto,
+  ) {
+    return this.authService.refreshToken(dto.refresh_token);
   }
 
   @Get('profile')

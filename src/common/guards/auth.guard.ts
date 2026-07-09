@@ -3,6 +3,7 @@ import {
   CanActivate,
   ExecutionContext,
   UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
 import { Request } from 'express';
 import {
@@ -12,6 +13,7 @@ import {
 
 @Injectable()
 export class AuthGuard implements CanActivate {
+  private readonly logger = new Logger(AuthGuard.name);
   private _supabase = createSupabaseClient();
   private _supabaseAdmin = createSupabaseAdminClient();
 
