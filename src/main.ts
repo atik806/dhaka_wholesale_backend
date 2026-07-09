@@ -7,14 +7,14 @@ import helmet from 'helmet';
 import { Logger } from '@nestjs/common';
 
 async function bootstrap() {
-  const required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'ADMIN_EMAIL', 'ADMIN_PASSWORD', 'CORS_ORIGIN'];
+  const required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'ADMIN_EMAIL', 'ADMIN_PASSWORD'];
   const missing = required.filter((key) => !process.env[key]);
   if (missing.length > 0) {
     console.error(`Missing required environment variables: ${missing.join(', ')}`);
     process.exit(1);
   }
 
-  const corsOriginValue = process.env.CORS_ORIGIN as string;
+  const corsOriginValue = process.env.CORS_ORIGIN || 'http://localhost:3000,http://localhost:3001,https://cholo-kini-omega.vercel.app';
 
   const app = await NestFactory.create(AppModule);
   const logger = new Logger('Bootstrap');
