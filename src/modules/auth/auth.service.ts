@@ -44,6 +44,11 @@ export class AuthService {
       throw new InternalServerErrorException('Failed to create user');
     }
 
+    await this.supabaseAdmin
+      .from('profiles')
+      .delete()
+      .eq('email', dto.email);
+
     const { error: profileError } = await this.supabaseAdmin
       .from('profiles')
       .upsert({
