@@ -123,8 +123,7 @@ export class OrdersService {
     return data.id;
   }
 
-  async checkout(dto: CheckoutOrderDto) {
-    const userId = await this.getAdminUserId();
+  async checkout(userId: string, dto: CheckoutOrderDto) {
     const subtotal = dto.items.reduce(
       (sum, item) => sum + item.price * item.quantity,
       0,
@@ -169,6 +168,11 @@ export class OrdersService {
       await this.supabase.from('orders').delete().eq('id', order.id);
       throw new InternalServerErrorException('Failed to create order items');
     }
+
+    await this.supabase
+      .from('profiles')
+      .update({ shipping_address: dto.shipping_address })
+      .eq('id', userId);
 
     return this.findById(order.id, userId);
   }

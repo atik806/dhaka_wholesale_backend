@@ -54,11 +54,14 @@ export class OrdersController {
   }
 
   @Post('checkout')
-  @ApiOperation({ summary: 'Checkout with items from client cart (public)' })
+  @UseGuards(AuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Checkout with items from client cart' })
   async checkout(
+    @CurrentUser() user: JwtUser,
     @Body(new ZodValidationPipe(CheckoutOrderSchema)) dto: CheckoutOrderDto,
   ) {
-    return this.ordersService.checkout(dto);
+    return this.ordersService.checkout(user.id, dto);
   }
 
   @Patch(':id/cancel')
