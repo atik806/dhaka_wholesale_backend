@@ -25,40 +25,52 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Authentication token is required');
     }
 
-    const {
-      data: { user },
-      error,
-    } = await this._supabase.auth.getUser(token);
+    let user: { id: string; email?: string; user_metadata?: Record<string, unknown> } | null = null;
 
-    if (error || !user) {
+    try {
+      const result = await this._supabase.auth.getUser(token);
+      if (result.error || !result.data?.user) {
+        throw new UnauthorizedException('Invalid or expired token');
+      }
+      user = result.data.user;
+    } catch (e) {
+      if (e instanceof UnauthorizedException) throw e;
+      this.logger.error(`Auth getUser failed: ${e}`);
       throw new UnauthorizedException('Invalid or expired token');
     }
 
-    let { data: profile } = await this._supabaseAdmin
-      .from('profiles')
-      .select('name, role')
-      .eq('id', user.id)
-      .single();
+    let profile: { name: string; role: string } | null = null;
+
+    try {
+      const { data } = await this._supabaseAdmin
+        .from('profiles')
+        .select('name, role')
+        .eq('id', user!.id)
+        .single();
+      profile = data;
+    } catch (e) {
+      this.logger.warn(`Profile query failed for ${user!.id}: ${e}`);
+    }
 
     if (!profile) {
       const name =
-        (user.user_metadata?.full_name ??
-        user.user_metadata?.name ??
-        user.email ??
+        (user!.user_metadata?.full_name ??
+        user!.user_metadata?.name ??
+        user!.email ??
         '').toString().slice(0, 100).replace(/[<>]/g, '');
-      const avatar_url = typeof user.user_metadata?.avatar_url === 'string'
-        ? user.user_metadata.avatar_url.slice(0, 500)
+      const avatar_url = typeof user!.user_metadata?.avatar_url === 'string'
+        ? (user!.user_metadata!.avatar_url as string).slice(0, 500)
         : null;
 
-      const { error: insertError } = await this._supabaseAdmin
-        .from('profiles')
-        .upsert(
-          { id: user.id, name, email: user.email ?? '', avatar_url, role: 'customer' },
-          { onConflict: 'id' },
-        );
-
-      if (insertError) {
-        this.logger.error(`Failed to create OAuth profile: ${insertError.message}`);
+      try {
+        await this._supabaseAdmin
+          .from('profiles')
+          .upsert(
+            { id: user!.id, name, email: user!.email ?? '', avatar_url, role: 'customer' },
+            { onConflict: 'id' },
+          );
+      } catch (e) {
+        this.logger.error(`Failed to create OAuth profile: ${e}`);
       }
 
       profile = { name, role: 'customer' };
