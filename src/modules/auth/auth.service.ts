@@ -243,11 +243,14 @@ export class AuthService {
 
   async syncOAuthProfile(userId: string, name: string, email: string) {
     const displayName = name || email.split('@')[0] || 'User';
+
+    await this.supabaseAdmin.from('profiles').delete().eq('email', email);
+
     const { error } = await this.supabaseAdmin
       .from('profiles')
       .upsert(
         { id: userId, name: displayName, email, role: 'customer' },
-        { onConflict: 'id', ignoreDuplicates: true },
+        { onConflict: 'id' },
       );
     if (error) {
       this.logger.error(`Failed to sync OAuth profile: ${error.message} (${error.code})`);
