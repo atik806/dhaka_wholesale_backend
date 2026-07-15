@@ -12,14 +12,28 @@ export class AdminService {
   private readonly logger = new Logger(AdminService.name);
   private supabase = createSupabaseAdminClient();
 
-  async getDashboardStats() {
+  async getDashboardStats(query?: { from?: string; to?: string }) {
+    let ordersQuery = this.supabase
+      .from('orders')
+      .select('total, created_at, payment_status');
+
+    if (query?.from) {
+      ordersQuery = ordersQuery.gte('created_at', query.from);
+    }
+    if (query?.to) {
+      ordersQuery = ordersQuery.lte('created_at', query.to);
+    }
+
     const [
       { count: totalProducts },
       { count: totalOrders },
       { count: totalUsers },
-      { data: revenueData },
+      { data: ordersForStats },
       { data: recentOrders },
       { data: lowStockProducts },
+      { count: pendingOrders },
+      { count: unreadMessages },
+      { count: pendingBugs },
     ] = await Promise.all([
       this.supabase
         .from('products')
@@ -28,7 +42,7 @@ export class AdminService {
       this.supabase
         .from('profiles')
         .select('*', { count: 'exact', head: true }),
-      this.supabase.from('orders').select('total').eq('payment_status', 'paid'),
+      ordersQuery,
       this.supabase
         .from('orders')
         .select('*, profiles(name, email)')
@@ -39,10 +53,50 @@ export class AdminService {
         .select('*')
         .in('stock', ['low-stock', 'out-of-stock'])
         .limit(5),
+      this.supabase
+        .from('orders')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending'),
+      this.supabase
+        .from('contact_messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('is_read', false),
+      this.supabase
+        .from('bug_reports')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending'),
     ]);
 
+    const paidOrders =
+      ordersForStats?.filter((o) => o.payment_status === 'paid') || [];
     const totalRevenue =
-      revenueData?.reduce((sum, o) => sum + (o.total || 0), 0) || 0;
+      paidOrders.reduce((sum, o) => sum + (o.total || 0), 0) || 0;
+
+    // Build daily revenue data for chart (last 30 days)
+    const dailyMap: Record<string, { revenue: number; orders: number }> = {};
+    const today = new Date();
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      dailyMap[key] = { revenue: 0, orders: 0 };
+    }
+
+    (ordersForStats || []).forEach((o) => {
+      const day = (o.created_at || '').slice(0, 10);
+      if (dailyMap[day]) {
+        dailyMap[day].orders += 1;
+        if (o.payment_status === 'paid') {
+          dailyMap[day].revenue += o.total || 0;
+        }
+      }
+    });
+
+    const revenueData = Object.entries(dailyMap).map(([date, val]) => ({
+      date,
+      revenue: val.revenue,
+      orders: val.orders,
+    }));
 
     return {
       stats: {
@@ -50,9 +104,13 @@ export class AdminService {
         totalOrders: totalOrders || 0,
         totalUsers: totalUsers || 0,
         totalRevenue,
+        pendingOrders: pendingOrders || 0,
+        unreadMessages: unreadMessages || 0,
+        pendingBugs: pendingBugs || 0,
       },
       recentOrders: recentOrders || [],
       lowStockProducts: lowStockProducts || [],
+      revenueData,
     };
   }
 
@@ -60,6 +118,7 @@ export class AdminService {
     page?: number;
     limit?: number;
     status?: string;
+    search?: string;
   }) {
     const page = query.page || 1;
     const limit = query.limit || 10;
@@ -71,6 +130,13 @@ export class AdminService {
 
     if (query.status) {
       sb = sb.eq('status', query.status);
+    }
+
+    if (query.search) {
+      const sanitized = query.search.replace(/[(),.]/g, '').slice(0, 200);
+      sb = sb.or(
+        `id.ilike.%${sanitized}%,shipping_address->>firstName.ilike.%${sanitized}%,shipping_address->>lastName.ilike.%${sanitized}%,shipping_address->>email.ilike.%${sanitized}%`,
+      );
     }
 
     const { data, error, count } = await sb

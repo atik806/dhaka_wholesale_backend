@@ -54,10 +54,16 @@ const PaginationQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional().default(10),
 });
 
+const DashboardQuerySchema = z.object({
+  from: z.string().optional(),
+  to: z.string().optional(),
+});
+
 const OrdersQuerySchema = PaginationQuerySchema.extend({
   status: z
     .enum(['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'])
     .optional(),
+  search: z.string().max(200).optional(),
 });
 
 @ApiTags('Admin')
@@ -70,8 +76,11 @@ export class AdminController {
   @Roles('admin')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get admin dashboard stats' })
-  async getDashboard() {
-    return this.adminService.getDashboardStats();
+  async getDashboard(
+    @Query(new ZodValidationPipe(DashboardQuerySchema))
+    query: { from?: string; to?: string },
+  ) {
+    return this.adminService.getDashboardStats(query);
   }
 
   @Get('orders')
@@ -85,6 +94,7 @@ export class AdminController {
       page?: number;
       limit?: number;
       status?: string;
+      search?: string;
     },
   ) {
     return this.adminService.findAllOrders(query);
