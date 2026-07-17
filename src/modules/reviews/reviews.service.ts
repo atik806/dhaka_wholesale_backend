@@ -17,7 +17,9 @@ export class ReviewsService {
   async findRecent(limit = 6) {
     const { data, error } = await this.supabase
       .from('reviews')
-      .select('id, rating, text, created_at, product_id, user_id, profiles(name, avatar_url), products(name, slug, images)')
+      .select(
+        'id, rating, text, created_at, product_id, user_id, profiles(name, avatar_url), products(name, slug, images)',
+      )
       .order('created_at', { ascending: false })
       .limit(limit);
 

@@ -50,10 +50,7 @@ export class SiteSettingsService {
     return data;
   }
 
-  async updateMany(
-    settings: Record<string, unknown>,
-    userId?: string,
-  ) {
+  async updateMany(settings: Record<string, unknown>, userId?: string) {
     const updates = Object.entries(settings).map(([key, value]) => ({
       key,
       value,

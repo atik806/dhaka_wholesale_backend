@@ -84,7 +84,10 @@ export class AdminController {
   @ApiOperation({ summary: 'Get admin dashboard stats' })
   async getDashboard(
     @Query(new ZodValidationPipe(DashboardQuerySchema))
-    query: { from?: string; to?: string },
+    query: {
+      from?: string;
+      to?: string;
+    },
   ) {
     return this.adminService.getDashboardStats(query);
   }
@@ -157,7 +160,11 @@ export class AdminController {
   @ApiOperation({ summary: 'Get all users' })
   async findAllUsers(
     @Query(new ZodValidationPipe(AdminUsersQuerySchema))
-    query: { page: number; limit: number; search: string },
+    query: {
+      page: number;
+      limit: number;
+      search: string;
+    },
   ) {
     return this.adminService.findAllUsers(query);
   }

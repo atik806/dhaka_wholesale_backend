@@ -159,10 +159,10 @@ export class ProductsService {
   }
 
   async update(id: string, dto: UpdateProductDto) {
-    let updatedData: Record<string, any> = { ...dto };
+    const updatedData: Record<string, any> = { ...dto };
 
     if (dto.name) {
-      let newSlug = (dto.name as string)
+      let newSlug = dto.name
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, '');

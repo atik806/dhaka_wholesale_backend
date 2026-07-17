@@ -74,7 +74,9 @@ export class CategoriesService {
       if (error.code === '23505') {
         throw new ConflictException('A category with this slug already exists');
       }
-      throw new InternalServerErrorException(`Failed to update category: ${error.message}`);
+      throw new InternalServerErrorException(
+        `Failed to update category: ${error.message}`,
+      );
     }
     if (!data) throw new NotFoundException('Category not found');
     return data;
@@ -103,7 +105,9 @@ export class CategoriesService {
       if (error.code === 'PGRST116' || error.code === '23503') {
         throw new NotFoundException('Category not found');
       }
-      throw new InternalServerErrorException(`Failed to delete category: ${error.message}`);
+      throw new InternalServerErrorException(
+        `Failed to delete category: ${error.message}`,
+      );
     }
     return { message: 'Category deleted successfully' };
   }

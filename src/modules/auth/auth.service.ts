@@ -228,7 +228,7 @@ export class AuthService {
       }
 
       // Try sign-in first
-      let { data: signInData, error: signInError } =
+      const { data: signInData, error: signInError } =
         await this.supabaseAdmin.auth.signInWithPassword({
           email: dto.email,
           password: dto.password,
@@ -369,8 +369,12 @@ export class AuthService {
     try {
       return await this.getProfile(userId);
     } catch {
-      this.logger.error(`Profile upsert succeeded but getProfile failed for user ${userId}`);
-      throw new InternalServerErrorException('Failed to retrieve created profile');
+      this.logger.error(
+        `Profile upsert succeeded but getProfile failed for user ${userId}`,
+      );
+      throw new InternalServerErrorException(
+        'Failed to retrieve created profile',
+      );
     }
   }
 }
