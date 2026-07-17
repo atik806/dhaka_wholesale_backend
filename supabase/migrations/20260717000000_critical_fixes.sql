@@ -54,7 +54,7 @@ CREATE TRIGGER decrement_stock
   FOR EACH ROW EXECUTE FUNCTION decrement_stock_on_order();
 
 -- =====================================================
--- FIX 5: Ensure site_settings table exists
+-- FIX 5: Ensure site_settings table + policies exist
 -- =====================================================
 CREATE TABLE IF NOT EXISTS site_settings (
   key TEXT PRIMARY KEY,
@@ -65,9 +65,11 @@ CREATE TABLE IF NOT EXISTS site_settings (
 
 ALTER TABLE site_settings ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Anyone can read site settings" ON site_settings;
 CREATE POLICY "Anyone can read site settings" ON site_settings
   FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Admins can manage site settings" ON site_settings;
 CREATE POLICY "Admins can manage site settings" ON site_settings
   FOR ALL USING (
     EXISTS (
