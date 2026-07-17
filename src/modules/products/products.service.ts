@@ -8,6 +8,12 @@ import type { UpdateProductDto } from './dto/update-product.dto.js';
 import type { QueryProductsDto } from './dto/query-products.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
 
+/** Columns needed for list/grid cards — excludes heavy description text. */
+const PRODUCT_LIST_SELECT =
+  'id, slug, name, price, original_price, images, rating, review_count, stock, tags, sizes, colors, is_new, is_featured, created_at, category_id, categories(name, slug)';
+
+const PRODUCT_DETAIL_SELECT = '*, categories(name, slug)';
+
 @Injectable()
 export class ProductsService {
   private supabase = createSupabaseAdminClient();
@@ -24,9 +30,14 @@ export class ProductsService {
       limit = 12,
     } = query;
 
+    // Inner join only when filtering by category so orphaned products still list
+    const select = category
+      ? 'id, slug, name, price, original_price, images, rating, review_count, stock, tags, sizes, colors, is_new, is_featured, created_at, category_id, categories!inner(name, slug)'
+      : PRODUCT_LIST_SELECT;
+
     let dbQuery = this.supabase
       .from('products')
-      .select('*, categories!inner(name, slug)', { count: 'exact' });
+      .select(select, { count: 'exact' });
 
     if (category) {
       dbQuery = dbQuery.eq('categories.slug', category);
@@ -88,7 +99,7 @@ export class ProductsService {
   async findBySlug(slug: string) {
     const { data, error } = await this.supabase
       .from('products')
-      .select('*, categories!inner(name, slug)')
+      .select(PRODUCT_DETAIL_SELECT)
       .eq('slug', slug)
       .single();
 
@@ -103,7 +114,7 @@ export class ProductsService {
   async getFeatured() {
     const { data, error } = await this.supabase
       .from('products')
-      .select('*, categories!inner(name, slug)')
+      .select(PRODUCT_LIST_SELECT)
       .eq('is_featured', true)
       .order('rating', { ascending: false })
       .limit(8);
@@ -116,7 +127,7 @@ export class ProductsService {
   async getRelated(productId: string, categoryId: string, limit = 4) {
     const { data, error } = await this.supabase
       .from('products')
-      .select('*, categories!inner(name, slug)')
+      .select(PRODUCT_LIST_SELECT)
       .eq('category_id', categoryId)
       .neq('id', productId)
       .order('rating', { ascending: false })
@@ -125,6 +136,44 @@ export class ProductsService {
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
     return data || [];
+  }
+
+  /** Resolve related products without loading the full product payload. */
+  async getRelatedBySlug(slug: string, limit = 4) {
+    const { data: product, error } = await this.supabase
+      .from('products')
+      .select('id, category_id')
+      .eq('slug', slug)
+      .single();
+
+    if (error || !product) throw new NotFoundException('Product not found');
+    return this.getRelated(product.id, product.category_id, limit);
+  }
+
+  async getStockStats() {
+    const [
+      { count: total },
+      { count: lowStock },
+      { count: outOfStock },
+    ] = await Promise.all([
+      this.supabase
+        .from('products')
+        .select('id', { count: 'exact', head: true }),
+      this.supabase
+        .from('products')
+        .select('id', { count: 'exact', head: true })
+        .eq('stock', 'low-stock'),
+      this.supabase
+        .from('products')
+        .select('id', { count: 'exact', head: true })
+        .eq('stock', 'out-of-stock'),
+    ]);
+
+    return {
+      total: total || 0,
+      lowStock: lowStock || 0,
+      outOfStock: outOfStock || 0,
+    };
   }
 
   async create(dto: CreateProductDto) {
@@ -217,7 +266,7 @@ export class ProductsService {
     try {
       const { count } = await this.supabase
         .from('products')
-        .select('*', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .eq('category_id', categoryId);
 
       await this.supabase

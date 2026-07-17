@@ -36,6 +36,7 @@ export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
   @Get()
+  @CacheTTL(60)
   @ApiOperation({
     summary: 'List products with search, filter, pagination, and sort',
   })
@@ -52,6 +53,13 @@ export class ProductsController {
     return this.productsService.getFeatured();
   }
 
+  @Get('stats')
+  @CacheTTL(60)
+  @ApiOperation({ summary: 'Get product stock counts for admin/overview cards' })
+  async getStockStats() {
+    return this.productsService.getStockStats();
+  }
+
   @Get(':slug')
   @CacheTTL(300)
   @ApiOperation({ summary: 'Get product by slug' })
@@ -63,8 +71,7 @@ export class ProductsController {
   @CacheTTL(300)
   @ApiOperation({ summary: 'Get related products' })
   async getRelated(@Param('slug') slug: string) {
-    const product = await this.productsService.findBySlug(slug);
-    return this.productsService.getRelated(product.id, product.category_id);
+    return this.productsService.getRelatedBySlug(slug);
   }
 
   @Post()

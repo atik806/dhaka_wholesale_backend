@@ -13,22 +13,39 @@ export class AdminService {
   private supabase = createSupabaseAdminClient();
 
   async getDashboardStats(query?: { from?: string; to?: string }) {
-    let ordersQuery = this.supabase
+    // Chart window: never pull more than 30 days of order rows for the trend
+    const chartDays = 30;
+    const chartFromDate = new Date();
+    chartFromDate.setDate(chartFromDate.getDate() - (chartDays - 1));
+    const chartFromIso = chartFromDate.toISOString();
+
+    let revenueQuery = this.supabase
       .from('orders')
-      .select('total, created_at, payment_status');
+      .select('total.sum()')
+      .eq('payment_status', 'paid');
 
     if (query?.from) {
-      ordersQuery = ordersQuery.gte('created_at', query.from);
+      revenueQuery = revenueQuery.gte('created_at', query.from);
     }
     if (query?.to) {
-      ordersQuery = ordersQuery.lte('created_at', query.to);
+      revenueQuery = revenueQuery.lte('created_at', query.to);
+    }
+
+    let chartQuery = this.supabase
+      .from('orders')
+      .select('total, created_at, payment_status')
+      .gte('created_at', chartFromIso);
+
+    if (query?.to) {
+      chartQuery = chartQuery.lte('created_at', query.to);
     }
 
     const [
       { count: totalProducts },
       { count: totalOrders },
       { count: totalUsers },
-      { data: ordersForStats },
+      { data: revenueAgg },
+      { data: chartOrders },
       { data: recentOrders },
       { data: lowStockProducts },
       { count: pendingOrders },
@@ -37,52 +54,71 @@ export class AdminService {
     ] = await Promise.all([
       this.supabase
         .from('products')
-        .select('*', { count: 'exact', head: true }),
-      this.supabase.from('orders').select('*', { count: 'exact', head: true }),
+        .select('id', { count: 'exact', head: true }),
+      this.supabase.from('orders').select('id', { count: 'exact', head: true }),
       this.supabase
         .from('profiles')
-        .select('*', { count: 'exact', head: true }),
-      ordersQuery,
+        .select('id', { count: 'exact', head: true }),
+      revenueQuery,
+      chartQuery,
       this.supabase
         .from('orders')
-        .select('*, profiles(name, email)')
+        .select(
+          'id, total, status, created_at, payment_status, profiles(name, email)',
+        )
         .order('created_at', { ascending: false })
         .limit(5),
       this.supabase
         .from('products')
-        .select('*')
+        .select('id, name, price, stock, images')
         .in('stock', ['low-stock', 'out-of-stock'])
         .limit(5),
       this.supabase
         .from('orders')
-        .select('*', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .eq('status', 'pending'),
       this.supabase
         .from('contact_messages')
-        .select('*', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .eq('is_read', false),
       this.supabase
         .from('bug_reports')
-        .select('*', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .eq('status', 'pending'),
     ]);
 
-    const paidOrders =
-      ordersForStats?.filter((o) => o.payment_status === 'paid') || [];
-    const totalRevenue =
-      paidOrders.reduce((sum, o) => sum + (o.total || 0), 0) || 0;
+    const revenueRow = Array.isArray(revenueAgg) ? revenueAgg[0] : revenueAgg;
+    const rawSum =
+      (revenueRow as { sum?: number; total?: number } | null | undefined)?.sum ??
+      (revenueRow as { total?: number } | null | undefined)?.total;
+    let totalRevenue = Number(rawSum);
+
+    // Fallback if aggregate is unavailable/unsupported
+    if (rawSum === undefined || rawSum === null || !Number.isFinite(totalRevenue)) {
+      let fallback = this.supabase
+        .from('orders')
+        .select('total')
+        .eq('payment_status', 'paid');
+      if (query?.from) fallback = fallback.gte('created_at', query.from);
+      if (query?.to) fallback = fallback.lte('created_at', query.to);
+      const { data: paidRows } = await fallback;
+      totalRevenue = (paidRows || []).reduce(
+        (sum, o) => sum + (o.total || 0),
+        0,
+      );
+    }
 
     // Build daily revenue data for chart (last 30 days)
     const dailyMap: Record<string, { revenue: number; orders: number }> = {};
     const today = new Date();
-    for (let i = 29; i >= 0; i--) {
+    for (let i = chartDays - 1; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
       const key = d.toISOString().slice(0, 10);
       dailyMap[key] = { revenue: 0, orders: 0 };
     }
 
-    (ordersForStats || []).forEach((o) => {
+    (chartOrders || []).forEach((o) => {
       const day = (o.created_at || '').slice(0, 10);
       if (dailyMap[day]) {
         dailyMap[day].orders += 1;
