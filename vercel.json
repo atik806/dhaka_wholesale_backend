@@ -4,14 +4,10 @@
   "buildCommand": null,
   "functions": {
     "api/index.ts": {
-      "includePaths": ["dist/**", "node_modules/**"]
+      "includeFiles": ["dist/**"]
     }
   },
   "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "api/index.ts"
-    },
     {
       "src": "/(.*)",
       "dest": "api/index.ts"
