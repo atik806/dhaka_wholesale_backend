@@ -76,19 +76,23 @@ export class CategoriesService {
   }
 
   async remove(id: string) {
+    const { count } = await this.supabase
+      .from('products')
+      .select('*', { count: 'exact', head: true })
+      .eq('category_id', id);
+
+    if (count && count > 0) {
+      throw new ConflictException(
+        `Cannot delete category: it still has ${count} product(s) assigned to it`,
+      );
+    }
+
     const { error } = await this.supabase
       .from('categories')
       .delete()
       .eq('id', id);
 
-    if (error) {
-      if (error.code === '23503') {
-        throw new ConflictException(
-          'Cannot delete category: it still has products assigned to it',
-        );
-      }
-      throw new NotFoundException('Category not found');
-    }
+    if (error) throw new NotFoundException('Category not found');
     return { message: 'Category deleted successfully' };
   }
 }

@@ -142,16 +142,6 @@ export class ProductsService {
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
 
-    const { count } = await this.supabase
-      .from('products')
-      .select('*', { count: 'exact', head: true })
-      .eq('category_id', dto.category_id);
-
-    await this.supabase
-      .from('categories')
-      .update({ product_count: count || 0 })
-      .eq('id', dto.category_id);
-
     return data;
   }
 
@@ -168,29 +158,11 @@ export class ProductsService {
   }
 
   async remove(id: string) {
-    const { data: product } = await this.supabase
-      .from('products')
-      .select('category_id')
-      .eq('id', id)
-      .single();
-
     const { error } = await this.supabase
       .from('products')
       .delete()
       .eq('id', id);
     if (error) throw new NotFoundException('Product not found');
-
-    if (product) {
-      const { count } = await this.supabase
-        .from('products')
-        .select('*', { count: 'exact', head: true })
-        .eq('category_id', product.category_id);
-
-      await this.supabase
-        .from('categories')
-        .update({ product_count: count || 0 })
-        .eq('id', product.category_id);
-    }
 
     return { message: 'Product deleted successfully' };
   }
