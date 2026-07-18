@@ -14,6 +14,10 @@ import { createSupabaseAdminClient } from '../../config/supabase.config.js';
 export class OrdersService {
   private supabase = createSupabaseAdminClient();
 
+  private calculateShippingCost(deliveryZone: string): number {
+    return deliveryZone === 'outside_dhaka' ? 120 : 80;
+  }
+
   async findByUser(userId: string, page = 1, limit = 10) {
     const from = (page - 1) * limit;
     const { data, error, count } = await this.supabase
@@ -64,7 +68,7 @@ export class OrdersService {
       (sum, item) => sum + (item.products?.price || 0) * item.quantity,
       0,
     );
-    const shippingCost = subtotal >= 50 ? 0 : 5;
+    const shippingCost = this.calculateShippingCost(dto.delivery_zone);
     const tax = subtotal * 0.08;
     const total = subtotal + shippingCost + tax;
 
@@ -79,6 +83,7 @@ export class OrdersService {
         total: Math.round(total * 100) / 100,
         shipping_address: dto.shipping_address,
         payment_method: dto.payment_method,
+        delivery_zone: dto.delivery_zone,
         payment_status: 'pending',
       })
       .select()
@@ -128,7 +133,7 @@ export class OrdersService {
       const product = productMap.get(item.product_id)!;
       return sum + product.price * item.quantity;
     }, 0);
-    const shippingCost = subtotal >= 50 ? 0 : 5;
+    const shippingCost = this.calculateShippingCost(dto.delivery_zone);
     const tax = subtotal * 0.08;
     const total = subtotal + shippingCost + tax;
 
@@ -143,6 +148,7 @@ export class OrdersService {
         total: Math.round(total * 100) / 100,
         shipping_address: dto.shipping_address,
         payment_method: dto.payment_method,
+        delivery_zone: dto.delivery_zone,
         payment_status: 'pending',
       })
       .select()

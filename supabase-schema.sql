@@ -105,6 +105,7 @@ CREATE TABLE orders (
   total DECIMAL(10,2) NOT NULL,
   shipping_address JSONB NOT NULL,
   payment_method TEXT NOT NULL,
+  delivery_zone TEXT DEFAULT 'inside_dhaka' CHECK (delivery_zone IN ('inside_dhaka', 'outside_dhaka')),
   payment_status TEXT DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid', 'failed', 'refunded')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
