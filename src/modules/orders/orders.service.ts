@@ -83,7 +83,6 @@ export class OrdersService {
         total: Math.round(total * 100) / 100,
         shipping_address: dto.shipping_address,
         payment_method: dto.payment_method,
-        delivery_zone: dto.delivery_zone,
         payment_status: 'pending',
       })
       .select()
@@ -148,7 +147,6 @@ export class OrdersService {
         total: Math.round(total * 100) / 100,
         shipping_address: dto.shipping_address,
         payment_method: dto.payment_method,
-        delivery_zone: dto.delivery_zone,
         payment_status: 'pending',
       })
       .select()

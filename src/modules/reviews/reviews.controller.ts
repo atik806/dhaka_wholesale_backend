@@ -5,6 +5,7 @@ import {
   Patch,
   Delete,
   Param,
+  Query,
   Body,
   UseGuards,
 } from '@nestjs/common';
@@ -35,8 +36,16 @@ export class ReviewsController {
 
   @Get('products/:productId/reviews')
   @ApiOperation({ summary: 'Get reviews for a product' })
-  async findByProduct(@Param('productId', UuidParamPipe) productId: string) {
-    return this.reviewsService.findByProduct(productId);
+  async findByProduct(
+    @Param('productId', UuidParamPipe) productId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.reviewsService.findByProduct(
+      productId,
+      page ? Math.max(1, Number(page)) : 1,
+      limit ? Math.min(50, Math.max(1, Number(limit))) : 20,
+    );
   }
 
   @Post('products/:productId/reviews')
