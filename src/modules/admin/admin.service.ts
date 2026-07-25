@@ -89,12 +89,16 @@ export class AdminService {
 
     const revenueRow = Array.isArray(revenueAgg) ? revenueAgg[0] : revenueAgg;
     const rawSum =
-      (revenueRow as { sum?: number; total?: number } | null | undefined)?.sum ??
-      (revenueRow as { total?: number } | null | undefined)?.total;
+      (revenueRow as { sum?: number; total?: number } | null | undefined)
+        ?.sum ?? (revenueRow as { total?: number } | null | undefined)?.total;
     let totalRevenue = Number(rawSum);
 
     // Fallback if aggregate is unavailable/unsupported
-    if (rawSum === undefined || rawSum === null || !Number.isFinite(totalRevenue)) {
+    if (
+      rawSum === undefined ||
+      rawSum === null ||
+      !Number.isFinite(totalRevenue)
+    ) {
       let fallback = this.supabase
         .from('orders')
         .select('total')

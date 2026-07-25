@@ -13,7 +13,9 @@ const ShippingAddressSchema = z.object({
 export const CreateOrderSchema = z.object({
   shipping_address: ShippingAddressSchema,
   payment_method: z.string().min(1),
-  delivery_zone: z.enum(['inside_dhaka', 'outside_dhaka']).default('inside_dhaka'),
+  delivery_zone: z
+    .enum(['inside_dhaka', 'outside_dhaka'])
+    .default('inside_dhaka'),
   notes: z.string().optional(),
 });
 
@@ -29,7 +31,9 @@ const CheckoutItemSchema = z.object({
 export const CheckoutOrderSchema = z.object({
   shipping_address: ShippingAddressSchema,
   payment_method: z.string().min(1),
-  delivery_zone: z.enum(['inside_dhaka', 'outside_dhaka']).default('inside_dhaka'),
+  delivery_zone: z
+    .enum(['inside_dhaka', 'outside_dhaka'])
+    .default('inside_dhaka'),
   items: z.array(CheckoutItemSchema).min(1, 'Cart is empty'),
   notes: z.string().optional(),
 });

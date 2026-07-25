@@ -160,14 +160,14 @@ export class ProductsService {
   }
 
   async getStockStats() {
-    const { data: all } = await this.supabase
-      .from('products')
-      .select('stock');
+    const { data: all } = await this.supabase.from('products').select('stock');
 
     const allProducts = all ?? [];
     const total = allProducts.length;
     const lowStock = allProducts.filter((p) => p.stock === 'low-stock').length;
-    const outOfStock = allProducts.filter((p) => p.stock === 'out-of-stock').length;
+    const outOfStock = allProducts.filter(
+      (p) => p.stock === 'out-of-stock',
+    ).length;
 
     return { total, lowStock, outOfStock };
   }
@@ -196,7 +196,9 @@ export class ProductsService {
       .single();
 
     if (error) {
-      this.logger.error(`Product create failed: ${error.message} (${error.code})`);
+      this.logger.error(
+        `Product create failed: ${error.message} (${error.code})`,
+      );
       throw new InternalServerErrorException('An internal error occurred');
     }
 
@@ -247,6 +249,4 @@ export class ProductsService {
 
     return { message: 'Product deleted successfully' };
   }
-
-
 }

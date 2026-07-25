@@ -73,7 +73,9 @@ export class CategoriesService {
       .single();
 
     if (error) {
-      this.logger.error(`Failed to update category ${id}: code=${error.code} message=${error.message}`);
+      this.logger.error(
+        `Failed to update category ${id}: code=${error.code} message=${error.message}`,
+      );
       if (error.code === '23505') {
         throw new ConflictException('A category with this slug already exists');
       }
@@ -90,7 +92,9 @@ export class CategoriesService {
       .eq('category_id', id);
 
     if (countError) {
-      this.logger.error(`Failed to count products for category ${id}: ${countError.message}`);
+      this.logger.error(
+        `Failed to count products for category ${id}: ${countError.message}`,
+      );
       throw new InternalServerErrorException('An internal error occurred');
     }
 
@@ -108,7 +112,9 @@ export class CategoriesService {
       .eq('id', id);
 
     if (error) {
-      this.logger.error(`Failed to delete category ${id}: code=${error.code} message=${error.message}`);
+      this.logger.error(
+        `Failed to delete category ${id}: code=${error.code} message=${error.message}`,
+      );
       if (error.code === '23503') {
         throw new ConflictException(
           'Cannot delete category: it still has products assigned to it.',

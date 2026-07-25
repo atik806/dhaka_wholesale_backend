@@ -55,7 +55,9 @@ export class ProductsController {
 
   @Get('stats')
   @CacheTTL(60)
-  @ApiOperation({ summary: 'Get product stock counts for admin/overview cards' })
+  @ApiOperation({
+    summary: 'Get product stock counts for admin/overview cards',
+  })
   async getStockStats() {
     return this.productsService.getStockStats();
   }
