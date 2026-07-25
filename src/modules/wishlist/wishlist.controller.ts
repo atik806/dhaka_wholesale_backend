@@ -14,7 +14,12 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import type { JwtUser } from '../../common/decorators/current-user.decorator.js';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
 import { UuidParamPipe } from '../../common/pipes/uuid-param.pipe.js';
-import { AddWishlistSchema, type AddWishlistDto } from './dto/wishlist.dto.js';
+import {
+  AddWishlistSchema,
+  MergeWishlistSchema,
+  type AddWishlistDto,
+  type MergeWishlistDto,
+} from './dto/wishlist.dto.js';
 
 @ApiTags('Wishlist')
 @Controller('wishlist')
@@ -27,6 +32,17 @@ export class WishlistController {
   @ApiOperation({ summary: 'Get user wishlist' })
   async findAll(@CurrentUser() user: JwtUser) {
     return this.wishlistService.findByUser(user.id);
+  }
+
+  @Post('merge')
+  @ApiOperation({
+    summary: 'Merge guest wishlist product IDs into the authenticated wishlist',
+  })
+  async mergeWishlist(
+    @CurrentUser() user: JwtUser,
+    @Body(new ZodValidationPipe(MergeWishlistSchema)) dto: MergeWishlistDto,
+  ) {
+    return this.wishlistService.mergeItems(user.id, dto);
   }
 
   @Post()

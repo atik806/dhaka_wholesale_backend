@@ -72,6 +72,7 @@ CREATE TABLE products (
   rating DECIMAL(2,1) DEFAULT 0,
   review_count INTEGER DEFAULT 0,
   stock TEXT DEFAULT 'in-stock' CHECK (stock IN ('in-stock', 'low-stock', 'out-of-stock')),
+  stock_quantity INTEGER DEFAULT 0 CHECK (stock_quantity >= 0),
   tags TEXT[] DEFAULT '{}',
   sizes TEXT[] DEFAULT '{}',
   colors JSONB DEFAULT '[]',

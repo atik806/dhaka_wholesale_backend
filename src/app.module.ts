@@ -9,6 +9,7 @@ import { CategoriesModule } from './modules/categories/categories.module.js';
 import { ProductsModule } from './modules/products/products.module.js';
 import { CartModule } from './modules/cart/cart.module.js';
 import { OrdersModule } from './modules/orders/orders.module.js';
+import { CheckoutModule } from './modules/checkout/checkout.module.js';
 import { ReviewsModule } from './modules/reviews/reviews.module.js';
 import { WishlistModule } from './modules/wishlist/wishlist.module.js';
 import { AdminModule } from './modules/admin/admin.module.js';
@@ -34,6 +35,7 @@ import { HttpCacheInterceptor } from './common/interceptors/http-cache.intercept
     ProductsModule,
     CartModule,
     OrdersModule,
+    CheckoutModule,
     ReviewsModule,
     WishlistModule,
     AdminModule,

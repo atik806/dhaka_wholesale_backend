@@ -1,5 +1,5 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import type { AddWishlistDto } from './dto/wishlist.dto.js';
+import type { AddWishlistDto, MergeWishlistDto } from './dto/wishlist.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
 
 @Injectable()
@@ -64,5 +64,28 @@ export class WishlistService {
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
     return { isInWishlist: !!data };
+  }
+
+  /**
+   * Merge guest wishlist product IDs into the authenticated user's wishlist.
+   * Existing product rows are skipped (idempotent).
+   */
+  async mergeItems(userId: string, dto: MergeWishlistDto) {
+    const uniqueIds = [...new Set(dto.product_ids)];
+    let added = 0;
+
+    for (const productId of uniqueIds) {
+      const result = await this.addItem(userId, { product_id: productId });
+      if (result && typeof result === 'object' && 'id' in result) {
+        added += 1;
+      }
+    }
+
+    const items = await this.findByUser(userId);
+    return {
+      items,
+      added_count: added,
+      total: items.length,
+    };
   }
 }

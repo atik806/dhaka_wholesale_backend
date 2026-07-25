@@ -14,6 +14,8 @@ export const UpdateProductSchema = z.object({
   images: z.array(z.string().url()).min(1).optional(),
   rating: z.number().min(0).max(5).optional(),
   review_count: z.number().int().min(0).optional(),
+  /** Integer inventory; `stock` enum is derived from this value when set. */
+  stock_quantity: z.number().int().min(0).optional(),
   stock: z.enum(['in-stock', 'low-stock', 'out-of-stock']).optional(),
   tags: z.array(z.string()).optional().catch([]),
   sizes: z.array(z.string()).optional().catch([]),

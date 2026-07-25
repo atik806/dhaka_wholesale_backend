@@ -9,14 +9,15 @@ import type {
   CheckoutOrderDto,
 } from './dto/create-order.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import {
+  calculateShippingCost,
+  calculateTax,
+  roundMoney,
+} from '../../common/utils/commerce.js';
 
 @Injectable()
 export class OrdersService {
   private supabase = createSupabaseAdminClient();
-
-  private calculateShippingCost(deliveryZone: string): number {
-    return deliveryZone === 'outside_dhaka' ? 120 : 80;
-  }
 
   async findByUser(userId: string, page = 1, limit = 10) {
     const from = (page - 1) * limit;
@@ -55,7 +56,7 @@ export class OrdersService {
   async create(userId: string, dto: CreateOrderDto) {
     const { data: cartItems, error: cartError } = await this.supabase
       .from('cart_items')
-      .select('*, products(*)')
+      .select('*, products(id, name, price, images, stock_quantity, stock)')
       .eq('user_id', userId);
 
     if (cartError)
@@ -64,12 +65,14 @@ export class OrdersService {
       throw new BadRequestException('Cart is empty');
     }
 
+    this.assertCartStock(cartItems);
+
     const subtotal = cartItems.reduce(
       (sum, item) => sum + (item.products?.price || 0) * item.quantity,
       0,
     );
-    const shippingCost = this.calculateShippingCost(dto.delivery_zone);
-    const tax = subtotal * 0.08;
+    const shippingCost = calculateShippingCost(dto.delivery_zone);
+    const tax = calculateTax(subtotal);
     const total = subtotal + shippingCost + tax;
 
     const { data: order, error: orderError } = await this.supabase
@@ -77,12 +80,13 @@ export class OrdersService {
       .insert({
         user_id: userId,
         status: 'pending',
-        subtotal: Math.round(subtotal * 100) / 100,
+        subtotal: roundMoney(subtotal),
         shipping_cost: shippingCost,
-        tax: Math.round(tax * 100) / 100,
-        total: Math.round(total * 100) / 100,
+        tax: roundMoney(tax),
+        total: roundMoney(total),
         shipping_address: dto.shipping_address,
         payment_method: dto.payment_method,
+        delivery_zone: dto.delivery_zone,
         payment_status: 'pending',
       })
       .select()
@@ -106,7 +110,11 @@ export class OrdersService {
       .insert(orderItems);
     if (itemsError) {
       await this.supabase.from('orders').delete().eq('id', order.id);
-      throw new InternalServerErrorException('Failed to create order items');
+      throw new BadRequestException(
+        itemsError.message.includes('Insufficient stock')
+          ? 'Insufficient stock for one or more items'
+          : 'Failed to create order items',
+      );
     }
 
     await this.supabase.from('cart_items').delete().eq('user_id', userId);
@@ -117,23 +125,24 @@ export class OrdersService {
     const productIds = dto.items.map((i) => i.product_id);
     const { data: products, error: prodError } = await this.supabase
       .from('products')
-      .select('id, name, price, images')
+      .select('id, name, price, images, stock_quantity, stock')
       .in('id', productIds);
 
     if (prodError)
       throw new InternalServerErrorException('Failed to verify products');
-    if (!products || products.length !== productIds.length) {
+    if (!products || products.length !== new Set(productIds).size) {
       throw new BadRequestException('One or more products are invalid');
     }
 
     const productMap = new Map(products.map((p) => [p.id, p]));
+    this.assertCheckoutStock(dto.items, productMap);
 
     const subtotal = dto.items.reduce((sum, item) => {
       const product = productMap.get(item.product_id)!;
       return sum + product.price * item.quantity;
     }, 0);
-    const shippingCost = this.calculateShippingCost(dto.delivery_zone);
-    const tax = subtotal * 0.08;
+    const shippingCost = calculateShippingCost(dto.delivery_zone);
+    const tax = calculateTax(subtotal);
     const total = subtotal + shippingCost + tax;
 
     const { data: order, error: orderError } = await this.supabase
@@ -141,12 +150,13 @@ export class OrdersService {
       .insert({
         user_id: userId,
         status: 'pending',
-        subtotal: Math.round(subtotal * 100) / 100,
+        subtotal: roundMoney(subtotal),
         shipping_cost: shippingCost,
-        tax: Math.round(tax * 100) / 100,
-        total: Math.round(total * 100) / 100,
+        tax: roundMoney(tax),
+        total: roundMoney(total),
         shipping_address: dto.shipping_address,
         payment_method: dto.payment_method,
+        delivery_zone: dto.delivery_zone,
         payment_status: 'pending',
       })
       .select()
@@ -174,7 +184,11 @@ export class OrdersService {
       .insert(orderItems);
     if (itemsError) {
       await this.supabase.from('orders').delete().eq('id', order.id);
-      throw new InternalServerErrorException('Failed to create order items');
+      throw new BadRequestException(
+        itemsError.message.includes('Insufficient stock')
+          ? 'Insufficient stock for one or more items'
+          : 'Failed to create order items',
+      );
     }
 
     await this.supabase
@@ -197,6 +211,7 @@ export class OrdersService {
     if (order.status !== 'pending')
       throw new BadRequestException('Only pending orders can be cancelled');
 
+    // Restock is handled by DB trigger restock_on_cancel
     const { data, error } = await this.supabase
       .from('orders')
       .update({ status: 'cancelled' })
@@ -207,5 +222,53 @@ export class OrdersService {
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
     return data;
+  }
+
+  private assertCartStock(
+    cartItems: Array<{
+      quantity: number;
+      products?: {
+        id?: string;
+        name?: string;
+        stock_quantity?: number | null;
+        stock?: string;
+      } | null;
+    }>,
+  ) {
+    for (const item of cartItems) {
+      const stockQty = item.products?.stock_quantity ?? 0;
+      const name = item.products?.name || 'Product';
+      if (stockQty < item.quantity) {
+        throw new BadRequestException(
+          `Insufficient stock for "${name}". Available: ${stockQty}, requested: ${item.quantity}`,
+        );
+      }
+    }
+  }
+
+  private assertCheckoutStock(
+    items: Array<{ product_id: string; quantity: number }>,
+    productMap: Map<
+      string,
+      { id: string; name: string; stock_quantity: number | null }
+    >,
+  ) {
+    const qtyByProduct = new Map<string, number>();
+    for (const item of items) {
+      qtyByProduct.set(
+        item.product_id,
+        (qtyByProduct.get(item.product_id) || 0) + item.quantity,
+      );
+    }
+
+    for (const [productId, requested] of qtyByProduct) {
+      const product = productMap.get(productId)!;
+      const stockQty = product.stock_quantity ?? 0;
+      if (stockQty < requested) {
+        throw new BadRequestException(
+          `Insufficient stock for "${product.name}". Available: ${stockQty}, requested: ${requested}`,
+        );
+      }
+    }
   }
 }

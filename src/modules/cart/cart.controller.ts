@@ -6,9 +6,10 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { CartService } from './cart.service.js';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
@@ -18,9 +19,12 @@ import { UuidParamPipe } from '../../common/pipes/uuid-param.pipe.js';
 import {
   AddCartItemSchema,
   UpdateCartItemSchema,
+  MergeCartSchema,
   type AddCartItemDto,
   type UpdateCartItemDto,
+  type MergeCartDto,
 } from './dto/cart-item.dto.js';
+import type { DeliveryZone } from '../../common/utils/commerce.js';
 
 @ApiTags('Cart')
 @Controller('cart')
@@ -36,9 +40,30 @@ export class CartController {
   }
 
   @Get('summary')
-  @ApiOperation({ summary: 'Get cart summary with totals' })
-  async getSummary(@CurrentUser() user: JwtUser) {
-    return this.cartService.getCartSummary(user.id);
+  @ApiOperation({ summary: 'Get cart summary with zone-based shipping totals' })
+  @ApiQuery({
+    name: 'delivery_zone',
+    required: false,
+    enum: ['inside_dhaka', 'outside_dhaka'],
+  })
+  async getSummary(
+    @CurrentUser() user: JwtUser,
+    @Query('delivery_zone') deliveryZone?: string,
+  ) {
+    const zone: DeliveryZone =
+      deliveryZone === 'outside_dhaka' ? 'outside_dhaka' : 'inside_dhaka';
+    return this.cartService.getCartSummary(user.id, zone);
+  }
+
+  @Post('merge')
+  @ApiOperation({
+    summary: 'Merge guest cart items into the authenticated user cart',
+  })
+  async mergeCart(
+    @CurrentUser() user: JwtUser,
+    @Body(new ZodValidationPipe(MergeCartSchema)) dto: MergeCartDto,
+  ) {
+    return this.cartService.mergeItems(user.id, dto);
   }
 
   @Post()

@@ -8,10 +8,14 @@ import type { CreateProductDto } from './dto/create-product.dto.js';
 import type { UpdateProductDto } from './dto/update-product.dto.js';
 import type { QueryProductsDto } from './dto/query-products.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import {
+  deriveStockStatus,
+  resolveStockQuantity,
+} from '../../common/utils/commerce.js';
 
 /** Columns needed for list/grid cards — excludes heavy description text. */
 const PRODUCT_LIST_SELECT =
-  'id, slug, name, price, original_price, images, rating, review_count, stock, tags, sizes, colors, is_new, is_featured, created_at, category_id, categories(name, slug)';
+  'id, slug, name, price, original_price, images, rating, review_count, stock, stock_quantity, tags, sizes, colors, is_new, is_featured, created_at, category_id, categories(name, slug)';
 
 const PRODUCT_DETAIL_SELECT = '*, categories(name, slug)';
 
@@ -189,9 +193,15 @@ export class ProductsService {
       slug = `${slug}-${suffix}`;
     }
 
+    const stock_quantity = resolveStockQuantity(
+      dto.stock_quantity,
+      dto.stock ?? 'in-stock',
+    );
+    const stock = deriveStockStatus(stock_quantity);
+
     const { data, error } = await this.supabase
       .from('products')
-      .insert({ ...dto, slug })
+      .insert({ ...dto, slug, stock_quantity, stock })
       .select()
       .single();
 
@@ -227,6 +237,15 @@ export class ProductsService {
       }
 
       updatedData.slug = newSlug;
+    }
+
+    if (dto.stock_quantity !== undefined) {
+      updatedData.stock_quantity = dto.stock_quantity;
+      updatedData.stock = deriveStockStatus(dto.stock_quantity);
+    } else if (dto.stock !== undefined) {
+      // Legacy enum-only updates still sync a sensible quantity
+      updatedData.stock_quantity = resolveStockQuantity(undefined, dto.stock);
+      updatedData.stock = dto.stock;
     }
 
     const { data, error } = await this.supabase
