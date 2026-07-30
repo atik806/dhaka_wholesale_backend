@@ -59,16 +59,32 @@ export class CategoriesService {
   }
 
   async getChildIds(parentId: string): Promise<string[]> {
-    const { data, error } = await this.supabase.rpc('get_child_category_ids', {
-      p_parent_id: parentId,
-    });
+    const allCategories = await this.findAll();
 
-    if (error) {
-      this.logger.error(`Failed to get child category IDs: ${error.message}`);
-      return [];
+    const childrenMap = new Map<string, string[]>();
+    for (const cat of allCategories) {
+      if (cat.parent_id) {
+        const existing = childrenMap.get(cat.parent_id) || [];
+        existing.push(cat.id);
+        childrenMap.set(cat.parent_id, existing);
+      }
     }
 
-    return data || [];
+    const result: string[] = [];
+    const stack = [parentId];
+
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      const directChildren = childrenMap.get(current);
+      if (directChildren) {
+        for (const childId of directChildren) {
+          result.push(childId);
+          stack.push(childId);
+        }
+      }
+    }
+
+    return result;
   }
 
   async create(dto: CreateCategoryDto) {
