@@ -8,6 +8,7 @@ import type { CreateProductDto } from './dto/create-product.dto.js';
 import type { UpdateProductDto } from './dto/update-product.dto.js';
 import type { QueryProductsDto } from './dto/query-products.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import { CategoriesService } from '../categories/categories.service.js';
 import {
   deriveStockStatus,
   resolveStockQuantity,
@@ -24,6 +25,8 @@ export class ProductsService {
   private readonly logger = new Logger(ProductsService.name);
   private supabase = createSupabaseAdminClient();
 
+  constructor(private readonly categoriesService: CategoriesService) {}
+
   async findAll(query: QueryProductsDto) {
     const {
       search,
@@ -36,23 +39,33 @@ export class ProductsService {
       limit = 12,
     } = query;
 
-    let resolvedCategoryId: string | null = null;
+    let resolvedCategoryIds: string[] | null = null;
     if (category) {
       const { data: cat } = await this.supabase
         .from('categories')
         .select('id')
         .eq('slug', category)
         .maybeSingle();
-      resolvedCategoryId = cat?.id ?? null;
+
+      if (cat) {
+        resolvedCategoryIds = [cat.id];
+        const childIds = await this.categoriesService.getChildIds(cat.id);
+        if (childIds.length > 0) {
+          resolvedCategoryIds = [...resolvedCategoryIds, ...childIds];
+        }
+      }
     }
 
     let dbQuery = this.supabase
       .from('products')
       .select(PRODUCT_LIST_SELECT, { count: 'exact' });
 
-    if (resolvedCategoryId) {
-      dbQuery = dbQuery.eq('category_id', resolvedCategoryId);
-    } else if (category && !resolvedCategoryId) {
+    if (resolvedCategoryIds && resolvedCategoryIds.length > 0) {
+      dbQuery = dbQuery.in('category_id', resolvedCategoryIds);
+    } else if (
+      category &&
+      (!resolvedCategoryIds || resolvedCategoryIds.length === 0)
+    ) {
       return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
     }
 

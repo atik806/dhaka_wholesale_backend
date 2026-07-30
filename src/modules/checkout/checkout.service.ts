@@ -61,7 +61,9 @@ export class CheckoutService {
   private async quoteFromCart(userId: string) {
     const { data: cartItems, error } = await this.supabase
       .from('cart_items')
-      .select('product_id, quantity, products(id, name, price, stock_quantity, stock)')
+      .select(
+        'product_id, quantity, products(id, name, price, stock_quantity, stock)',
+      )
       .eq('user_id', userId);
 
     if (error) {

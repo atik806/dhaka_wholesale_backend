@@ -104,7 +104,29 @@ ALTER TABLE order_items
   ADD CONSTRAINT order_items_product_id_fkey
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL;
 
--- 8. Additional performance indexes
+-- 8. Add parent_id to categories for hierarchical support
+ALTER TABLE categories
+  ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES categories(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_categories_parent_id ON categories(parent_id);
+
+-- Function to get all child category IDs (recursive) for a given parent
+CREATE OR REPLACE FUNCTION get_child_category_ids(p_parent_id UUID)
+RETURNS UUID[] AS $$
+DECLARE
+  result UUID[];
+BEGIN
+  WITH RECURSIVE cat_tree AS (
+    SELECT id FROM categories WHERE parent_id = p_parent_id
+    UNION ALL
+    SELECT c.id FROM categories c INNER JOIN cat_tree ct ON c.parent_id = ct.id
+  )
+  SELECT array_agg(id) INTO result FROM cat_tree;
+  RETURN COALESCE(result, ARRAY[]::UUID[]);
+END;
+$$ LANGUAGE plpgsql;
+
+-- 9. Additional performance indexes
 CREATE INDEX IF NOT EXISTS idx_products_created_at ON products(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_products_rating ON products(rating DESC);
 CREATE INDEX IF NOT EXISTS idx_products_review_count ON products(review_count DESC);

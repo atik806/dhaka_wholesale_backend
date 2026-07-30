@@ -54,6 +54,7 @@ CREATE TABLE categories (
   slug TEXT NOT NULL UNIQUE,
   description TEXT,
   image_url TEXT,
+  parent_id UUID REFERENCES categories(id) ON DELETE SET NULL,
   product_count INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()

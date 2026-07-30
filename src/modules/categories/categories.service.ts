@@ -26,6 +26,27 @@ export class CategoriesService {
     return data || [];
   }
 
+  async findTree() {
+    const categories = await this.findAll();
+
+    const map = new Map<string, any>();
+    const roots: any[] = [];
+
+    for (const cat of categories) {
+      map.set(cat.id, { ...cat, children: [] });
+    }
+
+    for (const cat of map.values()) {
+      if (cat.parent_id && map.has(cat.parent_id)) {
+        map.get(cat.parent_id).children.push(cat);
+      } else {
+        roots.push(cat);
+      }
+    }
+
+    return roots;
+  }
+
   async findBySlug(slug: string) {
     const { data, error } = await this.supabase
       .from('categories')
@@ -35,6 +56,19 @@ export class CategoriesService {
 
     if (error || !data) throw new NotFoundException('Category not found');
     return data;
+  }
+
+  async getChildIds(parentId: string): Promise<string[]> {
+    const { data, error } = await this.supabase.rpc('get_child_category_ids', {
+      p_parent_id: parentId,
+    });
+
+    if (error) {
+      this.logger.error(`Failed to get child category IDs: ${error.message}`);
+      return [];
+    }
+
+    return data || [];
   }
 
   async create(dto: CreateCategoryDto) {
@@ -49,9 +83,15 @@ export class CategoriesService {
       slug = 'category-' + Date.now();
     }
 
+    const insertData: Record<string, any> = { ...dto, slug, product_count: 0 };
+
+    if (dto.parent_id === null || dto.parent_id === undefined) {
+      delete insertData.parent_id;
+    }
+
     const { data, error } = await this.supabase
       .from('categories')
-      .insert({ ...dto, slug, product_count: 0 })
+      .insert(insertData)
       .select()
       .single();
 
@@ -65,9 +105,15 @@ export class CategoriesService {
   }
 
   async update(id: string, dto: UpdateCategoryDto) {
+    const updateData: Record<string, any> = { ...dto };
+
+    if (dto.parent_id === null || dto.parent_id === undefined) {
+      delete updateData.parent_id;
+    }
+
     const { data, error } = await this.supabase
       .from('categories')
-      .update(dto)
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();
@@ -86,6 +132,24 @@ export class CategoriesService {
   }
 
   async remove(id: string) {
+    const { data: childCategories, error: childError } = await this.supabase
+      .from('categories')
+      .select('id')
+      .eq('parent_id', id);
+
+    if (childError) {
+      this.logger.error(
+        `Failed to check child categories for ${id}: ${childError.message}`,
+      );
+      throw new InternalServerErrorException('An internal error occurred');
+    }
+
+    if (childCategories && childCategories.length > 0) {
+      throw new ConflictException(
+        `Cannot delete category: it still has ${childCategories.length} sub-categor(ies). Remove or reassign them first.`,
+      );
+    }
+
     const { data: products, error: countError } = await this.supabase
       .from('products')
       .select('id')

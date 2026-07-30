@@ -13,14 +13,26 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-const categories = [
-  { name: 'Electronics', slug: 'electronics', description: 'Cutting-edge gadgets and devices', image_url: 'https://picsum.photos/seed/electronics/800/600' },
-  { name: 'Fashion', slug: 'fashion', description: 'Trendsetting apparel and accessories', image_url: 'https://picsum.photos/seed/fashion/800/600' },
-  { name: 'Home & Living', slug: 'home-living', description: 'Elevate your living space', image_url: 'https://picsum.photos/seed/home-living/800/600' },
-  { name: 'Beauty', slug: 'beauty', description: 'Premium skincare and cosmetics', image_url: 'https://picsum.photos/seed/beauty/800/600' },
-  { name: 'Sports', slug: 'sports', description: 'Gear for an active lifestyle', image_url: 'https://picsum.photos/seed/sports/800/600' },
-  { name: 'Groceries', slug: 'groceries', description: 'Fresh and organic essentials', image_url: 'https://picsum.photos/seed/groceries/800/600' },
-  { name: 'Toys & Games', slug: 'toys', description: 'Fun for all ages', image_url: 'https://picsum.photos/seed/toys/800/600' },
+const parentCategories = [
+  { name: 'Electronics & Accessories', slug: 'electronics-accessories', description: 'Cutting-edge gadgets, devices and accessories', image_url: 'https://picsum.photos/seed/electronics-parent/800/600' },
+  { name: 'Fashion & Apparel', slug: 'fashion-apparel', description: 'Trendsetting apparel, accessories and footwear', image_url: 'https://picsum.photos/seed/fashion-parent/800/600' },
+  { name: 'Home & Lifestyle', slug: 'home-lifestyle', description: 'Elevate your living space with home essentials', image_url: 'https://picsum.photos/seed/home-parent/800/600' },
+  { name: 'Beauty & Personal Care', slug: 'beauty-personal-care', description: 'Premium skincare, cosmetics and personal care', image_url: 'https://picsum.photos/seed/beauty-parent/800/600' },
+  { name: 'Sports & Outdoors', slug: 'sports-outdoors', description: 'Gear for an active lifestyle and outdoor adventures', image_url: 'https://picsum.photos/seed/sports-parent/800/600' },
+  { name: 'Food & Groceries', slug: 'food-groceries', description: 'Fresh and organic essentials', image_url: 'https://picsum.photos/seed/groc-parent/800/600' },
+  { name: 'Toys & Games', slug: 'toys-games', description: 'Fun for all ages', image_url: 'https://picsum.photos/seed/toys-parent/800/600' },
+];
+
+const childCategories = [
+  { name: 'Electronics', slug: 'electronics', description: 'Gadgets and devices', image_url: 'https://picsum.photos/seed/electronics/800/600', parentSlug: 'electronics-accessories' },
+  { name: 'Accessories', slug: 'accessories', description: 'Tech accessories and peripherals', image_url: 'https://picsum.photos/seed/accessories/800/600', parentSlug: 'electronics-accessories' },
+  { name: 'Fashion', slug: 'fashion', description: 'Clothing and style', image_url: 'https://picsum.photos/seed/fashion/800/600', parentSlug: 'fashion-apparel' },
+  { name: 'Footwear', slug: 'footwear', description: 'Shoes and sneakers', image_url: 'https://picsum.photos/seed/footwear/800/600', parentSlug: 'fashion-apparel' },
+  { name: 'Home & Living', slug: 'home-living', description: 'Home decor and essentials', image_url: 'https://picsum.photos/seed/home-living/800/600', parentSlug: 'home-lifestyle' },
+  { name: 'Beauty', slug: 'beauty', description: 'Skincare and cosmetics', image_url: 'https://picsum.photos/seed/beauty/800/600', parentSlug: 'beauty-personal-care' },
+  { name: 'Sports', slug: 'sports', description: 'Sports equipment and gear', image_url: 'https://picsum.photos/seed/sports/800/600', parentSlug: 'sports-outdoors' },
+  { name: 'Groceries', slug: 'groceries', description: 'Fresh and packaged food', image_url: 'https://picsum.photos/seed/groceries/800/600', parentSlug: 'food-groceries' },
+  { name: 'Toys & Games', slug: 'toys', description: 'Games and playthings', image_url: 'https://picsum.photos/seed/toys/800/600', parentSlug: 'toys-games' },
 ];
 
 interface ProductData {
@@ -46,12 +58,12 @@ const products: ProductData[] = [
   { name: 'Portable Bluetooth Speaker', category: 'Electronics', price: 79, original_price: 99, images: ['https://picsum.photos/seed/elec-004-0/600/600', 'https://picsum.photos/seed/elec-004-1/600/600'], rating: 4.5, review_count: 412, stock: 'in-stock', description: 'Waterproof portable speaker with 360-degree sound, 20-hour battery, and a built-in power bank.', tags: ['audio', 'portable', 'waterproof'], is_new: false, is_featured: false, created_at: '2025-09-10' },
   { name: 'Mechanical Keyboard RGB', category: 'Electronics', price: 149, original_price: null, images: ['https://picsum.photos/seed/elec-005-0/600/600', 'https://picsum.photos/seed/elec-005-1/600/600'], rating: 4.4, review_count: 89, stock: 'in-stock', description: 'Hot-swappable mechanical keyboard with per-key RGB, PBT keycaps, and gasket-mounted switches.', tags: ['gaming', 'typing', 'rgb'], is_new: true, is_featured: false, created_at: '2025-12-10' },
   { name: '4K Webcam Pro', category: 'Electronics', price: 199, original_price: 249, images: ['https://picsum.photos/seed/elec-006-0/600/600'], rating: 4.3, review_count: 67, stock: 'low-stock', description: 'Professional 4K webcam with auto-focus, built-in ring light, and AI-powered background blur.', tags: ['camera', 'streaming', '4k'], is_new: false, is_featured: false, created_at: '2025-08-20' },
-  { name: 'Wireless Charging Pad', category: 'Electronics', price: 39, original_price: 49, images: ['https://picsum.photos/seed/elec-007-0/600/600'], rating: 4.2, review_count: 523, stock: 'in-stock', description: 'Fast wireless charger compatible with all Qi devices. Sleek aluminum design.', tags: ['charger', 'wireless', 'accessory'], is_new: false, is_featured: false, created_at: '2025-07-15' },
+  { name: 'Wireless Charging Pad', category: 'Accessories', price: 39, original_price: 49, images: ['https://picsum.photos/seed/elec-007-0/600/600'], rating: 4.2, review_count: 523, stock: 'in-stock', description: 'Fast wireless charger compatible with all Qi devices. Sleek aluminum design.', tags: ['charger', 'wireless', 'accessory'], is_new: false, is_featured: false, created_at: '2025-07-15' },
   { name: 'Tablet Pro 11', category: 'Electronics', price: 799, original_price: null, images: ['https://picsum.photos/seed/elec-008-0/600/600', 'https://picsum.photos/seed/elec-008-1/600/600'], rating: 4.7, review_count: 198, stock: 'in-stock', description: 'Versatile tablet with 11-inch Liquid Retina display and M-series chip.', tags: ['tablet', 'creative', 'productivity'], is_new: true, is_featured: false, created_at: '2025-12-05' },
   { name: 'Premium Cashmere Sweater', category: 'Fashion', price: 195, original_price: 295, images: ['https://picsum.photos/seed/fash-001-0/600/600', 'https://picsum.photos/seed/fash-001-1/600/600'], rating: 4.9, review_count: 145, stock: 'in-stock', description: 'Luxuriously soft cashmere sweater made from Grade-A Mongolian cashmere.', tags: ['cashmere', 'luxury', 'winter'], is_new: true, is_featured: true, created_at: '2025-12-08' },
   { name: 'Slim Fit Tailored Blazer', category: 'Fashion', price: 299, original_price: null, images: ['https://picsum.photos/seed/fash-002-0/600/600', 'https://picsum.photos/seed/fash-002-1/600/600'], rating: 4.7, review_count: 89, stock: 'in-stock', description: 'Sharp tailored blazer in Italian wool blend. Peak lapels, dual vents.', tags: ['formal', 'blazer', 'wool'], is_new: false, is_featured: true, created_at: '2025-11-10' },
   { name: 'Artisan Leather Tote', category: 'Fashion', price: 259, original_price: 329, images: ['https://picsum.photos/seed/fash-003-0/600/600', 'https://picsum.photos/seed/fash-003-1/600/600'], rating: 4.8, review_count: 212, stock: 'in-stock', description: 'Handcrafted full-grain leather tote with gold hardware.', tags: ['leather', 'handbag', 'artisan'], is_new: false, is_featured: true, created_at: '2025-10-25' },
-  { name: 'Classic White Sneakers', category: 'Fashion', price: 129, original_price: null, images: ['https://picsum.photos/seed/fash-004-0/600/600', 'https://picsum.photos/seed/fash-004-1/600/600'], rating: 4.6, review_count: 534, stock: 'in-stock', description: 'Minimalist leather sneakers with cushioned insoles and gum rubber sole.', tags: ['sneakers', 'leather', 'classic'], is_new: false, is_featured: false, created_at: '2025-09-05' },
+  { name: 'Classic White Sneakers', category: 'Footwear', price: 129, original_price: null, images: ['https://picsum.photos/seed/fash-004-0/600/600', 'https://picsum.photos/seed/fash-004-1/600/600'], rating: 4.6, review_count: 534, stock: 'in-stock', description: 'Minimalist leather sneakers with cushioned insoles and gum rubber sole.', tags: ['sneakers', 'leather', 'classic'], is_new: false, is_featured: false, created_at: '2025-09-05' },
   { name: 'Silk Evening Dress', category: 'Fashion', price: 449, original_price: null, images: ['https://picsum.photos/seed/fash-005-0/600/600', 'https://picsum.photos/seed/fash-005-1/600/600'], rating: 4.9, review_count: 56, stock: 'low-stock', description: 'Elegant 100% mulberry silk evening gown with flattering A-line silhouette.', tags: ['silk', 'evening', 'luxury'], is_new: true, is_featured: false, created_at: '2025-12-12' },
   { name: 'Cashmere Blend Scarf', category: 'Fashion', price: 89, original_price: 120, images: ['https://picsum.photos/seed/fash-006-0/600/600'], rating: 4.5, review_count: 321, stock: 'in-stock', description: 'Luxurious cashmere-blend scarf with classic herringbone pattern.', tags: ['scarf', 'cashmere', 'winter'], is_new: false, is_featured: false, created_at: '2025-09-20' },
   { name: 'Denim Jacket Vintage', category: 'Fashion', price: 159, original_price: null, images: ['https://picsum.photos/seed/fash-007-0/600/600', 'https://picsum.photos/seed/fash-007-1/600/600'], rating: 4.4, review_count: 178, stock: 'in-stock', description: 'Vintage-wash denim jacket with relaxed fit and corduroy collar.', tags: ['denim', 'jacket', 'vintage'], is_new: true, is_featured: false, created_at: '2025-11-30' },
@@ -90,9 +102,10 @@ async function seed() {
     console.error('Error clearing categories:', deleteCategoriesError.message);
   }
 
-  const { data: insertedCategories, error: catError } = await supabase
+  // Insert parent categories first
+  const { data: insertedParents, error: parentError } = await supabase
     .from('categories')
-    .insert(categories.map(c => ({
+    .insert(parentCategories.map(c => ({
       name: c.name,
       slug: c.slug,
       description: c.description,
@@ -101,16 +114,41 @@ async function seed() {
     })))
     .select();
 
-  if (catError) {
-    console.error('Error inserting categories:', catError.message);
+  if (parentError) {
+    console.error('Error inserting parent categories:', parentError.message);
     process.exit(1);
   }
 
-  console.log(`Inserted ${insertedCategories.length} categories`);
+  console.log(`Inserted ${insertedParents.length} parent categories`);
 
-  const categoryMap = new Map<string, string>();
-  for (const cat of insertedCategories) {
-    categoryMap.set(cat.name, cat.id);
+  const parentSlugMap = new Map<string, string>();
+  for (const cat of insertedParents) {
+    parentSlugMap.set(cat.slug, cat.id);
+  }
+
+  // Insert child categories with parent_id reference
+  const { data: insertedChildren, error: childError } = await supabase
+    .from('categories')
+    .insert(childCategories.map(c => ({
+      name: c.name,
+      slug: c.slug,
+      description: c.description,
+      image_url: c.image_url,
+      parent_id: parentSlugMap.get(c.parentSlug),
+      product_count: 0,
+    })))
+    .select();
+
+  if (childError) {
+    console.error('Error inserting child categories:', childError.message);
+    process.exit(1);
+  }
+
+  console.log(`Inserted ${insertedChildren.length} child categories`);
+
+  const categoryNameMap = new Map<string, string>();
+  for (const cat of insertedChildren) {
+    categoryNameMap.set(cat.name, cat.id);
   }
 
   const { error: deleteProductsError } = await supabase.from('products').delete().neq('id', '00000000-0000-0000-0000-000000000000');
@@ -119,7 +157,7 @@ async function seed() {
   }
 
   const productRecords = products.map((p) => {
-    const catId = categoryMap.get(p.category);
+    const catId = categoryNameMap.get(p.category);
     if (!catId) {
       console.warn(`Category not found for product: ${p.name} (${p.category})`);
     }
@@ -153,7 +191,8 @@ async function seed() {
 
   console.log(`Inserted ${insertedProducts.length} products\n`);
 
-  for (const cat of insertedCategories) {
+  const allCategories = [...insertedParents, ...insertedChildren];
+  for (const cat of allCategories) {
     const count = products.filter((p) => p.category === cat.name).length;
     await supabase
       .from('categories')

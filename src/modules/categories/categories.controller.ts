@@ -6,9 +6,15 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { CategoriesService } from './categories.service.js';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
@@ -32,8 +38,17 @@ export class CategoriesController {
 
   @Get()
   @CacheTTL(600)
-  @ApiOperation({ summary: 'Get all categories' })
-  async findAll() {
+  @ApiOperation({ summary: 'Get all categories (flat or tree)' })
+  @ApiQuery({
+    name: 'tree',
+    required: false,
+    type: Boolean,
+    description: 'Return hierarchical tree',
+  })
+  async findAll(@Query('tree') tree?: string) {
+    if (tree === 'true') {
+      return this.categoriesService.findTree();
+    }
     return this.categoriesService.findAll();
   }
 

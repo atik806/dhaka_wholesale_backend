@@ -15,7 +15,10 @@ export function calculateShippingCost(deliveryZone: string): number {
     : SHIPPING_BY_ZONE.inside_dhaka;
 }
 
-export function calculateTax(subtotal: number, rate = DEFAULT_TAX_RATE): number {
+export function calculateTax(
+  subtotal: number,
+  rate = DEFAULT_TAX_RATE,
+): number {
   return Math.round(subtotal * rate * 100) / 100;
 }
 
