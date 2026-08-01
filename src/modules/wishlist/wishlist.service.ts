@@ -68,23 +68,40 @@ export class WishlistService {
 
   /**
    * Merge guest wishlist product IDs into the authenticated user's wishlist.
-   * Existing product rows are skipped (idempotent).
+   * Existing product rows are skipped (idempotent). Uses a single query to
+   * fetch existing rows, then one batched insert for the new ones.
    */
   async mergeItems(userId: string, dto: MergeWishlistDto) {
     const uniqueIds = [...new Set(dto.product_ids)];
-    let added = 0;
+    if (uniqueIds.length === 0) {
+      const items = await this.findByUser(userId);
+      return { items, added_count: 0, total: items.length };
+    }
 
-    for (const productId of uniqueIds) {
-      const result = await this.addItem(userId, { product_id: productId });
-      if (result && typeof result === 'object' && 'id' in result) {
-        added += 1;
-      }
+    const { data: existingRows } = await this.supabase
+      .from('wishlists')
+      .select('product_id')
+      .eq('user_id', userId)
+      .in('product_id', uniqueIds);
+
+    const existingSet = new Set(
+      (existingRows ?? []).map((row) => row.product_id),
+    );
+
+    const newIds = uniqueIds.filter((id) => !existingSet.has(id));
+
+    if (newIds.length > 0) {
+      const { error } = await this.supabase
+        .from('wishlists')
+        .insert(newIds.map((product_id) => ({ user_id: userId, product_id })));
+      if (error)
+        throw new InternalServerErrorException('An internal error occurred');
     }
 
     const items = await this.findByUser(userId);
     return {
       items,
-      added_count: added,
+      added_count: newIds.length,
       total: items.length,
     };
   }

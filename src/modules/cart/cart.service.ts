@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import type {
   AddCartItemDto,
@@ -19,6 +20,7 @@ import {
 
 @Injectable()
 export class CartService {
+  private readonly logger = new Logger(CartService.name);
   private supabase = createSupabaseAdminClient();
 
   async findByUser(userId: string) {
@@ -162,103 +164,117 @@ export class CartService {
    * Merge guest cart items into the authenticated user's cart.
    * Matching product + size + color rows take max(serverQty, guestQty)
    * so re-login with a local mirror of the server cart does not double quantities.
+   *
+   * Reads are batched (1 stock query + 1 existing-items query) instead of a
+   * per-item round trip; inserts and updates are also batched.
    */
   async mergeItems(userId: string, dto: MergeCartDto) {
-    const merged: unknown[] = [];
+    const items = dto.items || [];
     const skipped: { product_id: string; reason: string }[] = [];
 
-    for (const item of dto.items) {
-      try {
-        const { data: product } = await this.supabase
-          .from('products')
-          .select('stock, stock_quantity')
-          .eq('id', item.product_id)
-          .single();
+    if (items.length === 0) {
+      const current = await this.findByUser(userId);
+      return { items: current, merged_count: 0, skipped };
+    }
 
-        if (!product) {
-          skipped.push({
-            product_id: item.product_id,
-            reason: 'Product not found',
-          });
-          continue;
+    const productIds = [...new Set(items.map((i) => i.product_id))];
+
+    // Batch stock lookup — single query for every item.
+    const { data: products } = await this.supabase
+      .from('products')
+      .select('id, stock, stock_quantity')
+      .in('id', productIds);
+
+    const stockById = new Map(
+      (products ?? []).map((p) => [p.id, p] as [string, any]),
+    );
+
+    // Batch existing cart items — single query instead of one per item.
+    const { data: existingRows } = await this.supabase
+      .from('cart_items')
+      .select('*')
+      .eq('user_id', userId)
+      .in('product_id', productIds);
+
+    const existingByKey = new Map<string, any>();
+    for (const row of existingRows ?? []) {
+      const key = `${row.product_id}|${row.selected_size ?? ''}|${row.selected_color ?? ''}`;
+      existingByKey.set(key, row);
+    }
+
+    const updatesByQuantity = new Map<number, string[]>();
+    const toInsert: Record<string, any>[] = [];
+    let mergedCount = 0;
+
+    for (const item of items) {
+      const product = stockById.get(item.product_id);
+      if (!product) {
+        skipped.push({
+          product_id: item.product_id,
+          reason: 'Product not found',
+        });
+        continue;
+      }
+
+      const stockQty = product.stock_quantity ?? 0;
+      if (stockQty <= 0 || product.stock === 'out-of-stock') {
+        skipped.push({
+          product_id: item.product_id,
+          reason: 'Product is out of stock',
+        });
+        continue;
+      }
+
+      const key = `${item.product_id}|${item.selected_size ?? ''}|${item.selected_color ?? ''}`;
+      const existing = existingByKey.get(key);
+
+      if (existing) {
+        const nextQty = Math.min(
+          Math.max(existing.quantity, item.quantity),
+          stockQty,
+        );
+        if (nextQty !== existing.quantity) {
+          const ids = updatesByQuantity.get(nextQty) || [];
+          ids.push(existing.id);
+          updatesByQuantity.set(nextQty, ids);
         }
-
-        const stockQty = product.stock_quantity ?? 0;
-        if (stockQty <= 0 || product.stock === 'out-of-stock') {
-          skipped.push({
-            product_id: item.product_id,
-            reason: 'Product is out of stock',
-          });
-          continue;
-        }
-
-        const { data: existing } = await this.supabase
-          .from('cart_items')
-          .select('*')
-          .eq('user_id', userId)
-          .eq('product_id', item.product_id)
-          .eq('selected_size', item.selected_size || null)
-          .eq('selected_color', item.selected_color || null)
-          .maybeSingle();
-
-        if (existing) {
-          const nextQty = Math.min(
-            Math.max(existing.quantity, item.quantity),
-            stockQty,
-          );
-          if (nextQty === existing.quantity) {
-            merged.push(existing);
-            continue;
-          }
-          const { data, error } = await this.supabase
-            .from('cart_items')
-            .update({ quantity: nextQty })
-            .eq('id', existing.id)
-            .select()
-            .single();
-          if (error) {
-            skipped.push({
-              product_id: item.product_id,
-              reason: 'Failed to update quantity',
-            });
-            continue;
-          }
-          merged.push(data);
-          continue;
-        }
-
-        const insertQty = Math.min(item.quantity, stockQty);
-        const { data, error } = await this.supabase
-          .from('cart_items')
-          .insert({
-            user_id: userId,
-            product_id: item.product_id,
-            quantity: insertQty,
-            selected_size: item.selected_size || null,
-            selected_color: item.selected_color || null,
-          })
-          .select()
-          .single();
-
-        if (error) {
-          skipped.push({
-            product_id: item.product_id,
-            reason: 'Failed to insert item',
-          });
-          continue;
-        }
-        merged.push(data);
-      } catch {
-        skipped.push({ product_id: item.product_id, reason: 'skipped' });
+        mergedCount += 1;
+      } else {
+        toInsert.push({
+          user_id: userId,
+          product_id: item.product_id,
+          quantity: Math.min(item.quantity, stockQty),
+          selected_size: item.selected_size || null,
+          selected_color: item.selected_color || null,
+        });
+        mergedCount += 1;
       }
     }
 
-    const items = await this.findByUser(userId);
-    return {
-      items,
-      merged_count: merged.length,
-      skipped,
-    };
+    // Batch all updates grouped by target quantity.
+    for (const [quantity, ids] of updatesByQuantity) {
+      const { error } = await this.supabase
+        .from('cart_items')
+        .update({ quantity })
+        .in('id', ids);
+      if (error) {
+        skipped.push({
+          product_id: ids[0],
+          reason: 'Failed to update quantity',
+        });
+      }
+    }
+
+    // Batch all inserts in a single call.
+    if (toInsert.length > 0) {
+      const { error } = await this.supabase.from('cart_items').insert(toInsert);
+      if (error) {
+        this.logger.error(`Cart merge insert failed: ${error.message}`);
+      }
+    }
+
+    const current = await this.findByUser(userId);
+    return { items: current, merged_count: mergedCount, skipped };
   }
 
   async getCartSummary(

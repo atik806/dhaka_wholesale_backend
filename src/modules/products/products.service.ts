@@ -9,6 +9,7 @@ import type { UpdateProductDto } from './dto/update-product.dto.js';
 import type { QueryProductsDto } from './dto/query-products.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
 import { CategoriesService } from '../categories/categories.service.js';
+import { CacheStore } from '../../common/cache/cache-store.js';
 import {
   deriveStockStatus,
   resolveStockQuantity,
@@ -25,7 +26,10 @@ export class ProductsService {
   private readonly logger = new Logger(ProductsService.name);
   private supabase = createSupabaseAdminClient();
 
-  constructor(private readonly categoriesService: CategoriesService) {}
+  constructor(
+    private readonly categoriesService: CategoriesService,
+    private readonly cacheStore: CacheStore,
+  ) {}
 
   async findAll(query: QueryProductsDto) {
     const {
@@ -177,16 +181,30 @@ export class ProductsService {
   }
 
   async getStockStats() {
-    const { data: all } = await this.supabase.from('products').select('stock');
+    // Aggregate per stock status with a GROUP BY (returns at most 3 rows).
+    const query = this.supabase.from('products').select('stock, count(*)');
+    const { data, error } = (await query) as unknown as {
+      data: { stock: string; count: string | number }[] | null;
+      error: { message: string } | null;
+    };
 
-    const allProducts = all ?? [];
-    const total = allProducts.length;
-    const lowStock = allProducts.filter((p) => p.stock === 'low-stock').length;
-    const outOfStock = allProducts.filter(
-      (p) => p.stock === 'out-of-stock',
-    ).length;
+    if (error)
+      throw new InternalServerErrorException('An internal error occurred');
 
-    return { total, lowStock, outOfStock };
+    const counts = new Map<string, number>();
+    for (const row of data ?? []) {
+      const n = Number(row.count) || 0;
+      counts.set(row.stock, (counts.get(row.stock) ?? 0) + n);
+    }
+
+    return {
+      total:
+        (counts.get('in-stock') ?? 0) +
+        (counts.get('low-stock') ?? 0) +
+        (counts.get('out-of-stock') ?? 0),
+      lowStock: counts.get('low-stock') ?? 0,
+      outOfStock: counts.get('out-of-stock') ?? 0,
+    };
   }
 
   async create(dto: CreateProductDto) {
@@ -225,6 +243,7 @@ export class ProductsService {
       throw new InternalServerErrorException('An internal error occurred');
     }
 
+    this.invalidateProductCaches();
     return data;
   }
 
@@ -269,6 +288,8 @@ export class ProductsService {
       .single();
 
     if (error) throw new NotFoundException('Product not found');
+
+    this.invalidateProductCaches();
     return data;
   }
 
@@ -279,6 +300,12 @@ export class ProductsService {
       .eq('id', id);
     if (error) throw new NotFoundException('Product not found');
 
+    this.invalidateProductCaches();
     return { message: 'Product deleted successfully' };
+  }
+
+  private invalidateProductCaches(): void {
+    this.cacheStore.deleteByPrefix('GET:/products');
+    this.cacheStore.deleteByPrefix('GET:/categories');
   }
 }

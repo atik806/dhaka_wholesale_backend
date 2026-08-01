@@ -8,11 +8,14 @@ import {
 import type { CreateCategoryDto } from './dto/create-category.dto.js';
 import type { UpdateCategoryDto } from './dto/update-category.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import { CacheStore } from '../../common/cache/cache-store.js';
 
 @Injectable()
 export class CategoriesService {
   private readonly logger = new Logger(CategoriesService.name);
   private supabase = createSupabaseAdminClient();
+
+  constructor(private readonly cacheStore: CacheStore) {}
 
   async findAll() {
     const { data, error } = await this.supabase
@@ -59,10 +62,30 @@ export class CategoriesService {
   }
 
   async getChildIds(parentId: string): Promise<string[]> {
-    const allCategories = await this.findAll();
+    // Prefer the database-side recursive CTE (single round trip, no full
+    // categories payload). Falls back to a lightweight in-memory walk.
+    try {
+      const { data, error } = await this.supabase.rpc(
+        'get_child_category_ids',
+        { p_parent_id: parentId },
+      );
+      if (!error && Array.isArray(data)) return data as string[];
+    } catch {
+      // fall through to the client-side fallback below
+    }
+
+    // Fallback: fetch only the lightweight relationship columns (avoids
+    // pulling every category's full row — including name, description,
+    // image_url — on each category-filtered product listing).
+    const { data, error } = await this.supabase
+      .from('categories')
+      .select('id, parent_id');
+
+    if (error)
+      throw new InternalServerErrorException('An internal error occurred');
 
     const childrenMap = new Map<string, string[]>();
-    for (const cat of allCategories) {
+    for (const cat of data ?? []) {
       if (cat.parent_id) {
         const existing = childrenMap.get(cat.parent_id) || [];
         existing.push(cat.id);
@@ -99,9 +122,21 @@ export class CategoriesService {
       slug = 'category-' + Date.now();
     }
 
+    if (dto.parent_id) {
+      const { data: parentExists } = await this.supabase
+        .from('categories')
+        .select('id')
+        .eq('id', dto.parent_id)
+        .maybeSingle();
+
+      if (!parentExists) {
+        throw new NotFoundException('Parent category not found');
+      }
+    }
+
     const insertData: Record<string, any> = { ...dto, slug, product_count: 0 };
 
-    if (dto.parent_id === null || dto.parent_id === undefined) {
+    if (dto.parent_id === undefined) {
       delete insertData.parent_id;
     }
 
@@ -117,13 +152,40 @@ export class CategoriesService {
       }
       throw new InternalServerErrorException('An internal error occurred');
     }
+    this.invalidateCategoryCaches();
     return data;
   }
 
   async update(id: string, dto: UpdateCategoryDto) {
+    if (dto.parent_id) {
+      if (dto.parent_id === id) {
+        throw new ConflictException('A category cannot be its own parent');
+      }
+
+      const childIds = await this.getChildIds(id);
+      if (childIds.includes(dto.parent_id)) {
+        throw new ConflictException(
+          'Cannot set a descendant as the parent (would create a cycle)',
+        );
+      }
+
+      const { data: parentExists } = await this.supabase
+        .from('categories')
+        .select('id')
+        .eq('id', dto.parent_id)
+        .maybeSingle();
+
+      if (!parentExists) {
+        throw new NotFoundException('Parent category not found');
+      }
+    }
+
     const updateData: Record<string, any> = { ...dto };
 
-    if (dto.parent_id === null || dto.parent_id === undefined) {
+    // Only strip the key when the caller did not send it. An explicit `null`
+    // means "promote this category to a top-level (parent) category", so it
+    // must be kept so the parent relationship is cleared.
+    if (dto.parent_id === undefined) {
       delete updateData.parent_id;
     }
 
@@ -144,6 +206,7 @@ export class CategoriesService {
       throw new InternalServerErrorException('An internal error occurred');
     }
     if (!data) throw new NotFoundException('Category not found');
+    this.invalidateCategoryCaches();
     return data;
   }
 
@@ -202,6 +265,12 @@ export class CategoriesService {
       }
       throw new InternalServerErrorException('An internal error occurred');
     }
+    this.invalidateCategoryCaches();
     return { message: 'Category deleted successfully' };
+  }
+
+  private invalidateCategoryCaches(): void {
+    this.cacheStore.deleteByPrefix('GET:/categories');
+    this.cacheStore.deleteByPrefix('GET:/products');
   }
 }

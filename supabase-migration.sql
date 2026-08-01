@@ -165,3 +165,15 @@ DROP TRIGGER IF EXISTS product_count_update ON products;
 CREATE TRIGGER product_count_update
   AFTER INSERT OR UPDATE OR DELETE ON products
   FOR EACH ROW EXECUTE FUNCTION update_category_product_count();
+
+-- 10. Composite indexes for common query patterns (fixes N+1 / slow lookups)
+CREATE INDEX IF NOT EXISTS idx_categories_slug ON categories(slug);
+CREATE INDEX IF NOT EXISTS idx_cart_items_user_product ON cart_items(user_id, product_id);
+CREATE INDEX IF NOT EXISTS idx_wishlists_user_product ON wishlists(user_id, product_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_product_created ON reviews(product_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_products_category_rating ON products(category_id, rating DESC);
+
+-- 11. Fast ILIKE search (leading-wildcard %term% currently forces a full scan)
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS idx_products_name_trgm ON products USING GIN (name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_products_description_trgm ON products USING GIN (description gin_trgm_ops);
