@@ -1,6 +1,7 @@
 import {
   Injectable,
   NotFoundException,
+  ConflictException,
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
@@ -35,6 +36,7 @@ export class ProductsService {
     const {
       search,
       category,
+      categories,
       priceMin,
       priceMax,
       minRating,
@@ -43,21 +45,29 @@ export class ProductsService {
       limit = 12,
     } = query;
 
+    // Resolve one or more category slugs to category ids (children included)
+    // so the filter happens server-side. This keeps pagination and totals
+    // correct for multi-category selection — the client must never fetch a
+    // single page of the whole catalog and filter locally (that silently
+    // truncates results and breaks page counts).
     let resolvedCategoryIds: string[] | null = null;
-    if (category) {
-      const { data: cat } = await this.supabase
-        .from('categories')
-        .select('id')
-        .eq('slug', category)
-        .maybeSingle();
+    const slugs = categories?.length ? categories : category ? [category] : [];
+    if (slugs.length > 0) {
+      const ids = new Set<string>();
+      for (const slug of slugs) {
+        const { data: cat } = await this.supabase
+          .from('categories')
+          .select('id')
+          .eq('slug', slug)
+          .maybeSingle();
 
-      if (cat) {
-        resolvedCategoryIds = [cat.id];
-        const childIds = await this.categoriesService.getChildIds(cat.id);
-        if (childIds.length > 0) {
-          resolvedCategoryIds = [...resolvedCategoryIds, ...childIds];
+        if (cat) {
+          ids.add(cat.id);
+          const childIds = await this.categoriesService.getChildIds(cat.id);
+          childIds.forEach((childId) => ids.add(childId));
         }
       }
+      resolvedCategoryIds = [...ids];
     }
 
     let dbQuery = this.supabase
@@ -67,14 +77,20 @@ export class ProductsService {
     if (resolvedCategoryIds && resolvedCategoryIds.length > 0) {
       dbQuery = dbQuery.in('category_id', resolvedCategoryIds);
     } else if (
-      category &&
+      slugs.length > 0 &&
       (!resolvedCategoryIds || resolvedCategoryIds.length === 0)
     ) {
       return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
     }
 
     if (search) {
-      const sanitized = search.replace(/[(),.]/g, '').slice(0, 200);
+      // Only plain words, spaces and hyphens survive. Everything else
+      // is stripped so the user-supplied term can never smuggle an
+      // operator (and, or, NOT, =, etc.) into the PostgREST filter.
+      const sanitized = search
+        .replace(/[^\p{L}\p{N}\s-]/gu, '')
+        .trim()
+        .slice(0, 120);
       const searchTerm = `%${sanitized}%`;
       dbQuery = dbQuery.or(
         `name.ilike.${searchTerm},description.ilike.${searchTerm},tags.cs.{${sanitized}}`,
@@ -298,7 +314,20 @@ export class ProductsService {
       .from('products')
       .delete()
       .eq('id', id);
-    if (error) throw new NotFoundException('Product not found');
+    if (error) {
+      // order_items.product_id is ON DELETE RESTRICT, so a product that
+      // has been ordered cannot be deleted. That's a conflict, not a
+      // missing row.
+      if (error.code === '23503') {
+        throw new ConflictException(
+          'Product cannot be deleted because it has been ordered',
+        );
+      }
+      this.logger.error(`Failed to delete product ${id}: ${error.message}`);
+      throw new InternalServerErrorException(
+        'Failed to delete product',
+      );
+    }
 
     this.invalidateProductCaches();
     return { message: 'Product deleted successfully' };

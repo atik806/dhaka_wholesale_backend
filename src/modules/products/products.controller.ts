@@ -54,6 +54,9 @@ export class ProductsController {
   }
 
   @Get('stats')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth()
   @CacheTTL(60)
   @ApiOperation({
     summary: 'Get product stock counts for admin/overview cards',
