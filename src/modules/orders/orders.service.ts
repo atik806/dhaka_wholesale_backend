@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
   InternalServerErrorException,
 } from '@nestjs/common';
 import type {
@@ -18,6 +19,33 @@ import {
 @Injectable()
 export class OrdersService {
   private supabase = createSupabaseAdminClient();
+
+  /**
+   * The decrement_stock trigger fails the order_items insert with a
+   * check_violation when a concurrent request already took the last
+   * unit. That's a stock race, not a malformed request.
+   */
+  private isOversellError(message?: string) {
+    return (
+      !!message &&
+      (message.includes('Insufficient stock') ||
+        message.includes('check_violation'))
+    );
+  }
+
+  /**
+   * Clean up a half-created order when its items fail to insert.
+   * Best effort: if the cleanup itself fails there is nothing more we
+   * can do here; a stale 'pending' order is safer than losing the user
+   * an order that actually went through.
+   */
+  private async cleanupOrder(orderId: string) {
+    try {
+      await this.supabase.from('orders').delete().eq('id', orderId);
+    } catch {
+      // ignored — see method comment
+    }
+  }
 
   async findByUser(userId: string, page = 1, limit = 10) {
     const from = (page - 1) * limit;
@@ -92,7 +120,8 @@ export class OrdersService {
       .select()
       .single();
 
-    if (orderError) throw new InternalServerErrorException(orderError.message);
+    if (orderError)
+      throw new InternalServerErrorException('Failed to create order');
 
     const orderItems = cartItems.map((item) => ({
       order_id: order.id,
@@ -109,15 +138,30 @@ export class OrdersService {
       .from('order_items')
       .insert(orderItems);
     if (itemsError) {
-      await this.supabase.from('orders').delete().eq('id', order.id);
-      throw new BadRequestException(
-        itemsError.message.includes('Insufficient stock')
-          ? 'Insufficient stock for one or more items'
-          : 'Failed to create order items',
+      await this.cleanupOrder(order.id);
+      if (this.isOversellError(itemsError.message)) {
+        throw new ConflictException(
+          'Insufficient stock for one or more items',
+        );
+      }
+      throw new BadRequestException('Failed to create order items');
+    }
+
+    // Only empty the cart once the order and its items are durable.
+    const { error: cartDeleteError } = await this.supabase
+      .from('cart_items')
+      .delete()
+      .eq('user_id', userId);
+    if (cartDeleteError) {
+      // The order is placed; a leftover cart must never be reported as
+      // a failed purchase. Best effort cleanup of the duplicate so the
+      // user isn't charged conceptually twice.
+      await this.cleanupOrder(order.id);
+      throw new InternalServerErrorException(
+        'Order created but cart could not be cleared. Please check your orders.',
       );
     }
 
-    await this.supabase.from('cart_items').delete().eq('user_id', userId);
     return this.findById(order.id, userId);
   }
 
@@ -183,12 +227,13 @@ export class OrdersService {
       .from('order_items')
       .insert(orderItems);
     if (itemsError) {
-      await this.supabase.from('orders').delete().eq('id', order.id);
-      throw new BadRequestException(
-        itemsError.message.includes('Insufficient stock')
-          ? 'Insufficient stock for one or more items'
-          : 'Failed to create order items',
-      );
+      await this.cleanupOrder(order.id);
+      if (this.isOversellError(itemsError.message)) {
+        throw new ConflictException(
+          'Insufficient stock for one or more items',
+        );
+      }
+      throw new BadRequestException('Failed to create order items');
     }
 
     await this.supabase
