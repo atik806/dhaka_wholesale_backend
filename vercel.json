@@ -1,6 +1,7 @@
 {
   "version": 2,
-  "installCommand": "rm -rf node_modules && npm install",
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build",
   "builds": [
     {
       "src": "api/index.ts",

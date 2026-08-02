@@ -99,12 +99,12 @@ CREATE TABLE cart_items (
 -- Orders
 CREATE TABLE orders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES profiles(id),
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'shipped', 'delivered', 'cancelled')),
-  subtotal DECIMAL(10,2) NOT NULL,
-  shipping_cost DECIMAL(10,2) DEFAULT 5.00,
-  tax DECIMAL(10,2) DEFAULT 0,
-  total DECIMAL(10,2) NOT NULL,
+  subtotal DECIMAL(10,2) NOT NULL CHECK (subtotal >= 0),
+  shipping_cost DECIMAL(10,2) DEFAULT 5.00 CHECK (shipping_cost >= 0),
+  tax DECIMAL(10,2) DEFAULT 0 CHECK (tax >= 0),
+  total DECIMAL(10,2) NOT NULL CHECK (total >= 0),
   shipping_address JSONB NOT NULL,
   payment_method TEXT NOT NULL,
   delivery_zone TEXT DEFAULT 'inside_dhaka' CHECK (delivery_zone IN ('inside_dhaka', 'outside_dhaka')),
@@ -120,8 +120,8 @@ CREATE TABLE order_items (
   product_id UUID NOT NULL REFERENCES products(id),
   product_name TEXT NOT NULL,
   product_image TEXT,
-  price DECIMAL(10,2) NOT NULL,
-  quantity INTEGER NOT NULL,
+  price DECIMAL(10,2) NOT NULL CHECK (price >= 0),
+  quantity INTEGER NOT NULL CHECK (quantity > 0),
   selected_size TEXT,
   selected_color TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -198,10 +198,14 @@ CREATE POLICY "Users can view own profile" ON profiles
   FOR SELECT USING (auth.uid() = id);
 
 CREATE POLICY "Users can update own profile" ON profiles
-  FOR UPDATE USING (auth.uid() = id);
+  FOR UPDATE USING (auth.uid() = id)
+  WITH CHECK (auth.uid() = id AND role = 'customer');
 
 CREATE POLICY "Users can insert own profile" ON profiles
-  FOR INSERT WITH CHECK (auth.uid() = id);
+  FOR INSERT WITH CHECK (auth.uid() = id AND role = 'customer');
+
+-- Defense in depth: a client key must never write the role column.
+REVOKE UPDATE (role) ON public.profiles FROM authenticated;
 
 -- Cart: users can only access their own
 CREATE POLICY "Users can view own cart" ON cart_items
@@ -216,15 +220,15 @@ CREATE POLICY "Users can update own cart" ON cart_items
 CREATE POLICY "Users can delete own cart" ON cart_items
   FOR DELETE USING (auth.uid() = user_id);
 
--- Orders: users can only access their own
+-- Orders: users can only access their own.
+-- Orders are created/updated only by the backend (service role);
+-- client keys cannot write them, so a client can never forge a paid
+-- or delivered order.
 CREATE POLICY "Users can view own orders" ON orders
   FOR SELECT USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can insert own orders" ON orders
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own orders" ON orders
-  FOR UPDATE USING (auth.uid() = user_id);
+REVOKE INSERT, UPDATE ON public.orders FROM authenticated;
+REVOKE INSERT, UPDATE, DELETE ON public.order_items FROM authenticated;
 
 -- Order items: users can view their own
 CREATE POLICY "Users can view own order items" ON order_items
