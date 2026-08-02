@@ -55,6 +55,11 @@ export class HttpCacheInterceptor {
 
   private generateKey(context: ExecutionContext): string {
     const request = context.switchToHttp().getRequest();
-    return `${request.method}:${request.url}`;
+    const user = request.user;
+    // Scope cached responses by user id. A user-specific cached body
+    // (e.g. an authenticated view) must never leak to another user via
+    // a shared key that ignores identity.
+    const userScope = user?.sub ?? user?.id ?? 'anon';
+    return `${request.method}:${request.url}:user:${userScope}`;
   }
 }

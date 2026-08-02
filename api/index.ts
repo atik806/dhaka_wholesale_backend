@@ -28,7 +28,11 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api');
 
-  const corsOriginValue = process.env.CORS_ORIGIN || 'https://dhakawholesale.com,http://localhost:3000';
+  // Fail-closed CORS: no wildcard fallback. If CORS_ORIGIN is unset,
+  // only the production site is allowed — a local dev frontend must
+  // explicitly opt in via CORS_ORIGIN.
+  const corsOriginValue =
+    process.env.CORS_ORIGIN || 'https://dhakawholesale.com';
   const corsOrigins = corsOriginValue.split(',').map((o: string) => o.trim()).filter(Boolean);
 
   app.enableCors({
@@ -40,7 +44,14 @@ async function bootstrap() {
     crossOriginResourcePolicy: { policy: 'cross-origin' },
     crossOriginEmbedderPolicy: false,
     crossOriginOpenerPolicy: false,
-    contentSecurityPolicy: false,
+    // A JSON API has no inline scripts/styles of its own; a restrictive
+    // CSP is both safe and free here.
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
   }));
   app.use(compression());
 
@@ -70,9 +81,10 @@ export default async function handler(req: any, res: any) {
     server(req, res);
   } catch (err: any) {
     console.error('[handler] Bootstrap error:', err);
+    // Never echo internal error text (paths, env names, DB messages)
+    // to the caller.
     res.status(500).json({
       error: 'Function invocation failed',
-      message: err?.message || String(err),
     });
   }
 }

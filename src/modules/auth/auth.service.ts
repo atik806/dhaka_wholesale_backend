@@ -226,117 +226,87 @@ export class AuthService {
     // must stay unauthenticated so it bypasses RLS via service_role key.
     const signInClient = createSupabaseClient();
 
-    // When ADMIN_EMAIL and ADMIN_PASSWORD are set, validate against them directly
-    if (adminEmail && adminPassword) {
-      if (dto.email !== adminEmail || dto.password !== adminPassword) {
-        throw new UnauthorizedException('Invalid admin credentials');
-      }
-
-      // Try sign-in first
-      let sessionResult: { user: any; session: any } | null = null;
-      const { data: signInData, error: signInError } =
-        await signInClient.auth.signInWithPassword({
-          email: dto.email,
-          password: dto.password,
-        });
-
-      // If the admin account doesn't exist in Supabase yet, create it
-      if (signInError) {
-        const { data: created, error: createError } =
-          await this.supabaseAdmin.auth.admin.createUser({
-            email: dto.email,
-            password: dto.password,
-            email_confirm: true,
-          });
-        if (createError) {
-          throw new UnauthorizedException('Admin login failed');
-        }
-
-        await this.supabaseAdmin.from('profiles').upsert(
-          {
-            id: created.user.id,
-            email: dto.email,
-            role: 'admin',
-            name: 'Admin',
-          },
-          { onConflict: 'id' },
-        );
-
-        // Sign in after creating the account
-        const { data: retryData, error: retryError } =
-          await signInClient.auth.signInWithPassword({
-            email: dto.email,
-            password: dto.password,
-          });
-        if (retryError) {
-          throw new UnauthorizedException('Admin login failed');
-        }
-        sessionResult = retryData;
-      } else {
-        sessionResult = signInData;
-      }
-
-      if (!sessionResult?.session || !sessionResult.user) {
-        throw new UnauthorizedException('Admin login failed');
-      }
-
-      return {
-        user: {
-          id: sessionResult.user.id,
-          email: dto.email,
-          name: 'Admin',
-          role: 'admin' as const,
-          phone: null,
-          avatar_url: null,
-          shipping_address: null,
-        },
-        session: {
-          access_token: sessionResult.session.access_token,
-          refresh_token: sessionResult.session.refresh_token,
-          expires_at: sessionResult.session.expires_at,
-        },
-      };
+    // Admin access is fail-closed: it requires ADMIN_EMAIL and
+    // ADMIN_PASSWORD to be configured. Without them we refuse rather
+    // than falling back to "any profile with role=admin" — that path
+    // made the admin role itself the whole security boundary, which
+    // the RLS hardening (role column no longer client-writable) is
+    // specifically designed to protect.
+    if (!adminEmail || !adminPassword) {
+      this.logger.error(
+        'ADMIN_EMAIL / ADMIN_PASSWORD are not set — admin login disabled',
+      );
+      throw new UnauthorizedException('Admin login is not configured');
     }
 
-    // Fallback: no env vars set — any user with role=admin in profiles can log in
+    if (dto.email !== adminEmail || dto.password !== adminPassword) {
+      throw new UnauthorizedException('Invalid admin credentials');
+    }
+
+    // Try sign-in first
+    let sessionResult: { user: any; session: any } | null = null;
     const { data: signInData, error: signInError } =
       await signInClient.auth.signInWithPassword({
         email: dto.email,
         password: dto.password,
       });
 
-    if (signInError || !signInData?.session) {
-      throw new UnauthorizedException('Invalid email or password');
-    }
-
-    const userId = signInData.user.id;
-
-    const { data: profile } = await this.supabaseAdmin
-      .from('profiles')
-      .select('id, name, email, role, phone, avatar_url, shipping_address')
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (profile?.role === 'admin') {
-      return {
-        user: {
-          id: userId,
+    // If the admin account doesn't exist in Supabase yet, create it
+    if (signInError) {
+      const { data: created, error: createError } =
+        await this.supabaseAdmin.auth.admin.createUser({
           email: dto.email,
-          name: profile.name || 'Admin',
-          role: 'admin' as const,
-          phone: profile.phone || null,
-          avatar_url: profile.avatar_url || null,
-          shipping_address: profile.shipping_address || null,
+          password: dto.password,
+          email_confirm: true,
+        });
+      if (createError) {
+        throw new UnauthorizedException('Admin login failed');
+      }
+
+      await this.supabaseAdmin.from('profiles').upsert(
+        {
+          id: created.user.id,
+          email: dto.email,
+          role: 'admin',
+          name: 'Admin',
         },
-        session: {
-          access_token: signInData.session.access_token,
-          refresh_token: signInData.session.refresh_token,
-          expires_at: signInData.session.expires_at,
-        },
-      };
+        { onConflict: 'id' },
+      );
+
+      // Sign in after creating the account
+      const { data: retryData, error: retryError } =
+        await signInClient.auth.signInWithPassword({
+          email: dto.email,
+          password: dto.password,
+        });
+      if (retryError) {
+        throw new UnauthorizedException('Admin login failed');
+      }
+      sessionResult = retryData;
+    } else {
+      sessionResult = signInData;
     }
 
-    throw new UnauthorizedException('You do not have admin access');
+    if (!sessionResult?.session || !sessionResult.user) {
+      throw new UnauthorizedException('Admin login failed');
+    }
+
+    return {
+      user: {
+        id: sessionResult.user.id,
+        email: dto.email,
+        name: 'Admin',
+        role: 'admin' as const,
+        phone: null,
+        avatar_url: null,
+        shipping_address: null,
+      },
+      session: {
+        access_token: sessionResult.session.access_token,
+        refresh_token: sessionResult.session.refresh_token,
+        expires_at: sessionResult.session.expires_at,
+      },
+    };
   }
 
   async syncOAuthProfile(userId: string, name: string, email: string) {
