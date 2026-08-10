@@ -1,6 +1,13 @@
 -- ====================================================
 -- COMPREHENSIVE FIX: Run ALL of these in Supabase SQL Editor
 -- ====================================================
+-- NOTE (2026-08-10): the ad-hoc policies added by this scratch patch /
+-- FIX 3 are superseded by the versioned migration
+-- `migrations/20260810000000_fix_security_findings.sql` (constrained
+-- bug_reports/contact_messages INSERT policies, wishlist read drop, hardened
+-- is_admin(), narrowed realtime publication). If this file is still applied to
+-- fresh databases, prefer the migration. The is_admin() function below remains
+-- valid but the migration pins its search_path and tightens EXECUTE grants.
 
 -- FIX 1: Add delivery_zone column to orders (fixes order placement 500 error)
 ALTER TABLE orders
