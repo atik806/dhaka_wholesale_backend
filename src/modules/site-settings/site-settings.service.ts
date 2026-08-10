@@ -1,5 +1,16 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+
+/**
+ * Keys the public (unauthenticated) GET endpoints may expose. Everything
+ * else — payment config, contact info, keys — stays admin-only. The frontend
+ * reads exactly one public key today: `promo_banner`.
+ */
+const PUBLIC_SETTINGS_KEYS = ['promo_banner'];
 
 @Injectable()
 export class SiteSettingsService {
@@ -8,7 +19,8 @@ export class SiteSettingsService {
   async getAll() {
     const { data, error } = await this.supabase
       .from('site_settings')
-      .select('key, value');
+      .select('key, value')
+      .in('key', PUBLIC_SETTINGS_KEYS);
 
     if (error)
       throw new InternalServerErrorException('Failed to fetch site settings');
@@ -21,6 +33,12 @@ export class SiteSettingsService {
   }
 
   async get(key: string) {
+    // Non-allowlisted keys 404 exactly like a missing row, so an attacker
+    // cannot distinguish "key exists but hidden" from "key doesn't exist".
+    if (!PUBLIC_SETTINGS_KEYS.includes(key)) {
+      throw new NotFoundException('Site setting not found');
+    }
+
     const { data, error } = await this.supabase
       .from('site_settings')
       .select('value')
@@ -29,7 +47,8 @@ export class SiteSettingsService {
 
     if (error)
       throw new InternalServerErrorException('Failed to fetch site setting');
-    return data?.value || null;
+    if (!data) throw new NotFoundException('Site setting not found');
+    return data.value;
   }
 
   async update(key: string, value: Record<string, unknown>, userId?: string) {
