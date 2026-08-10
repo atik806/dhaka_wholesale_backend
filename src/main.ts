@@ -5,6 +5,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import compression from 'compression';
+import cookieParser from 'cookie-parser';
 import { Logger } from '@nestjs/common';
 
 async function bootstrap() {
@@ -54,6 +55,9 @@ async function bootstrap() {
     }),
   );
   app.use(compression());
+  // Parses the httpOnly session cookie (`dw_session`) so guards and
+  // controllers can authenticate requests that carry no Authorization header.
+  app.use(cookieParser());
 
   app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalInterceptors(new TransformInterceptor());

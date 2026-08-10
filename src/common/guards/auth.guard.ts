@@ -10,6 +10,7 @@ import {
   createSupabaseClient,
   createSupabaseAdminClient,
 } from '../../config/supabase.config.js';
+import { readAuthCookies } from '../auth/auth-cookies.js';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -80,9 +81,14 @@ export class AuthGuard implements CanActivate {
 
   private extractToken(request: Request): string | undefined {
     const authHeader = request.headers.authorization;
-    if (!authHeader) return undefined;
+    if (authHeader) {
+      const [type, token] = authHeader.split(' ');
+      if (type === 'Bearer') return token;
+    }
 
-    const [type, token] = authHeader.split(' ');
-    return type === 'Bearer' ? token : undefined;
+    // No Authorization header — fall back to the httpOnly `dw_session`
+    // cookie set by the auth endpoints. The client sends tokens only via
+    // this cookie (never in JS-accessible storage).
+    return readAuthCookies(request)?.access_token;
   }
 }

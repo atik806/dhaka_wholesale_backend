@@ -309,35 +309,90 @@ export class AuthService {
     };
   }
 
+  /**
+   * Best-effort server-side session revocation. Failure here is never fatal:
+   * the controller clears the cookie regardless, so a user can always log out
+   * even if the auth API is unreachable.
+   */
+  async logout(accessToken?: string) {
+    if (accessToken) {
+      try {
+        await this.supabaseAdmin.auth.admin.signOut(accessToken);
+      } catch (e) {
+        this.logger.warn(`Session revoke failed during logout: ${e}`);
+      }
+    }
+    return { message: 'Logged out' };
+  }
+
+  /**
+   * Import a Supabase-client session (from the OAuth callback) into the
+   * httpOnly cookie. The access token is verified against the auth API before
+   * any cookie is set; the refresh token is stored for later /auth/refresh.
+   */
+  async syncSession(accessToken: string) {
+    const { data, error } = await this.supabase.auth.getUser(accessToken);
+    if (error || !data.user) {
+      throw new UnauthorizedException('Invalid or expired token');
+    }
+
+    // Existing profiles keep their stored name/role — never overwrite them on
+    // a repeat OAuth sign-in (mirrors the old getProfile-first flow). Only a
+    // brand-new OAuth user with no profile row yet gets one created via
+    // syncOAuthProfile, which is role-safe (M3).
+    const { data: existing } = await this.supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('id', data.user.id)
+      .maybeSingle();
+
+    if (existing) {
+      return this.getProfile(data.user.id);
+    }
+
+    const oauthName =
+      data.user.user_metadata?.full_name ??
+      data.user.user_metadata?.name ??
+      data.user.email ??
+      '';
+    const oauthEmail = data.user.email ?? '';
+
+    return this.syncOAuthProfile(data.user.id, oauthName, oauthEmail);
+  }
+
   async syncOAuthProfile(userId: string, name: string, email: string) {
     const displayName = name || email.split('@')[0] || 'User';
 
-    // Direct upsert — no prior delete (avoids race conditions and RLS issues)
-    const { error: upsertError } = await this.supabaseAdmin
+    // Never overwrite an existing profile's role. A blind upsert that resets
+    // role:'customer' would silently demote an admin who signs in via Google
+    // on every sync. Fetch first, update only name/email on existing rows,
+    // and only seed role:'customer' when creating a brand-new profile.
+    const { data: existing } = await this.supabaseAdmin
       .from('profiles')
-      .upsert(
-        { id: userId, name: displayName, email, role: 'customer' },
-        { onConflict: 'id' },
-      );
+      .select('id')
+      .eq('id', userId)
+      .maybeSingle();
 
-    if (upsertError) {
-      this.logger.error(
-        `Failed to sync OAuth profile (attempt 1) for user ${userId}: ${upsertError.message} (${upsertError.code}). Check that SUPABASE_SERVICE_ROLE_KEY is set in Vercel env vars.`,
-      );
-
-      // Retry once after a short delay
-      await new Promise((r) => setTimeout(r, 500));
-
-      const { error: retryError } = await this.supabaseAdmin
+    if (existing) {
+      const { error: updateError } = await this.supabaseAdmin
         .from('profiles')
-        .upsert(
-          { id: userId, name: displayName, email, role: 'customer' },
-          { onConflict: 'id' },
-        );
+        .update({ name: displayName, email })
+        .eq('id', userId);
 
-      if (retryError) {
+      if (updateError) {
         this.logger.error(
-          `Failed to sync OAuth profile (attempt 2): ${retryError.message} (${retryError.code})`,
+          `Failed to sync OAuth profile (update) for user ${userId}: ${updateError.message} (${updateError.code}). Check that SUPABASE_SERVICE_ROLE_KEY is set in Vercel env vars.`,
+        );
+        throw new InternalServerErrorException('Failed to update user profile');
+      }
+    } else {
+      const { error: insertError } = await this.supabaseAdmin
+        .from('profiles')
+        .insert({ id: userId, name: displayName, email, role: 'customer' });
+
+      if (insertError) {
+        this.logger.error(
+          `Failed to sync OAuth profile (insert) for user ${userId}: ${insertError.message} (${insertError.code}). Check that SUPABASE_SERVICE_ROLE_KEY is set in Vercel env vars.`,
         );
         throw new InternalServerErrorException('Failed to create user profile');
       }
@@ -348,7 +403,7 @@ export class AuthService {
       return await this.getProfile(userId);
     } catch {
       this.logger.error(
-        `Profile upsert succeeded but getProfile failed for user ${userId}`,
+        `Profile sync succeeded but getProfile failed for user ${userId}`,
       );
       throw new InternalServerErrorException(
         'Failed to retrieve created profile',
