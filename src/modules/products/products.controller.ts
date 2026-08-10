@@ -57,7 +57,8 @@ export class ProductsController {
   @UseGuards(AuthGuard, RolesGuard)
   @Roles('admin')
   @ApiBearerAuth()
-  @CacheTTL(60)
+  // No @CacheTTL: this is an admin-only aggregate and must never be cached
+  // or served publicly.
   @ApiOperation({
     summary: 'Get product stock counts for admin/overview cards',
   })

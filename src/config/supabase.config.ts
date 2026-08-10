@@ -49,6 +49,15 @@ export function createSupabaseClient(): SupabaseClient {
 }
 
 export function createSupabaseAdminClient(): SupabaseClient {
+  // The service-role key must never reach the browser. A bundler would
+  // replace `process.env.SUPABASE_SERVICE_ROLE_KEY` with the literal env
+  // value at build time, embedding the key into any JS bundle that imports
+  // this module. Fail loudly if client code ever tries.
+  if (typeof window !== 'undefined') {
+    throw new Error(
+      'createSupabaseAdminClient() may only be called on the server. The SUPABASE_SERVICE_ROLE_KEY must never be bundled into client-side code.',
+    );
+  }
   if (_adminClient) return _adminClient;
 
   const supabaseUrl = process.env.SUPABASE_URL;

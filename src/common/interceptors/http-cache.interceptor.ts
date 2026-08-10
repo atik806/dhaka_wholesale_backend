@@ -26,13 +26,28 @@ export class HttpCacheInterceptor {
       return next.handle();
     }
 
+    const request = context
+      .switchToHttp()
+      .getRequest<Request & { user?: unknown }>();
+    const response = context.switchToHttp().getResponse<Response>();
+
+    // Authenticated responses must never be shared. A `public` header with
+    // s-maxage would let a shared cache (CDN/proxy) serve one user's body to
+    // another, so authed responses are marked `private, no-store` and bypass
+    // the cache store entirely (no-store means the response must not be
+    // stored anywhere, not even our in-memory store).
+    if (request.user) {
+      response.setHeader('Cache-Control', 'private, no-store');
+      return next.handle();
+    }
+
     const cacheKey = this.generateKey(context);
     const cached = this.cacheStore.get(cacheKey);
 
     if (cached !== undefined) {
-      const response = context.switchToHttp().getResponse<Response>();
       response.setHeader('X-Cache', 'HIT');
       response.setHeader('Cache-Control', this.buildCacheControl(ttl, ttl));
+      response.setHeader('Vary', 'Accept-Encoding, Authorization');
       return of(cached);
     }
 
@@ -40,10 +55,9 @@ export class HttpCacheInterceptor {
       tap((data) => {
         this.cacheStore.set(cacheKey, data, ttl);
 
-        const response = context.switchToHttp().getResponse<Response>();
         response.setHeader('X-Cache', 'MISS');
         response.setHeader('Cache-Control', this.buildCacheControl(ttl, ttl));
-        response.setHeader('Vary', 'Accept-Encoding');
+        response.setHeader('Vary', 'Accept-Encoding, Authorization');
       }),
     );
   }
