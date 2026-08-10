@@ -37,7 +37,8 @@ const REPORT_MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 const MAGIC_BYTES: Array<{ mime: string; sniff: (buf: Buffer) => boolean }> = [
   {
     mime: 'image/jpeg',
-    sniff: (b) => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+    sniff: (b) =>
+      b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
   },
   {
     mime: 'image/png',

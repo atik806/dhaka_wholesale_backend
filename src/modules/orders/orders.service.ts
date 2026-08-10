@@ -140,9 +140,7 @@ export class OrdersService {
     if (itemsError) {
       await this.cleanupOrder(order.id);
       if (this.isOversellError(itemsError.message)) {
-        throw new ConflictException(
-          'Insufficient stock for one or more items',
-        );
+        throw new ConflictException('Insufficient stock for one or more items');
       }
       throw new BadRequestException('Failed to create order items');
     }
@@ -229,9 +227,7 @@ export class OrdersService {
     if (itemsError) {
       await this.cleanupOrder(order.id);
       if (this.isOversellError(itemsError.message)) {
-        throw new ConflictException(
-          'Insufficient stock for one or more items',
-        );
+        throw new ConflictException('Insufficient stock for one or more items');
       }
       throw new BadRequestException('Failed to create order items');
     }

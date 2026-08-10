@@ -1,98 +1,133 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Dhaka Wholesale — API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+REST API powering the [Dhaka Wholesale](https://github.com) e-commerce platform. Built with NestJS, TypeScript, and Supabase (PostgreSQL + Auth + Realtime).
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+The API serves the customer storefront, the authenticated shopping flows (cart, checkout, orders, wishlist, reviews), and the full admin dashboard (products, orders, users, reviews, contact, bug reports).
 
-## Description
+## Tech Stack
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+- **NestJS 11** — modular, dependency-injected backend framework
+- **TypeScript 5** with Zod for compile-time and runtime validation
+- **Supabase** — PostgreSQL database, authentication (JWT), and Realtime for live admin updates
+- **Helmet + compression + rate limiting** — production security & performance hardening
+- **Swagger** — interactive API docs (enable via `ENABLE_SWAGGER`)
 
-## Project setup
+## Features
 
-```bash
-$ npm install
+| Area | Highlights |
+| --- | --- |
+| **Auth** | Register / login / refresh tokens, profile updates, role-based access control (`customer` / `admin`) |
+| **Products** | CRUD, search, multi-category filter, price/rating filters, sort, pagination, featured & related products, admin stock stats |
+| **Categories** | Hierarchical categories with `parent_id` support and child-aware filtering |
+| **Cart & Wishlist** | Add/remove/update, size & color variants, batch merge on login |
+| **Checkout & Orders** | Server-authoritative quoting, stock-availability checks, oversell protection (409), order lifecycle (`pending → confirmed → shipped → delivered / cancelled`), payment status tracking |
+| **Admin** | Dashboard stats & revenue trend, order/user/review/contact/bug-report management, user creation & role management |
+| **Uploads** | Image uploads validated by MIME magic bytes |
+| **Caching** | In-memory response cache with user-scoped keys and explicit invalidation on writes |
+
+## Project Structure
+
+```
+src/
+├── common/          # Shared guards, pipes, filters, interceptors, decorators, cache
+├── config/          # Supabase client configuration
+├── modules/
+│   ├── admin/       # Dashboard + admin management endpoints
+│   ├── auth/        # Authentication & authorization
+│   ├── products/    # Catalog, search, filtering, stock stats
+│   ├── categories/  # Hierarchical categories
+│   ├── cart/        # Shopping cart
+│   ├── checkout/    # Quote + order placement
+│   ├── orders/      # Order history & status
+│   ├── reviews/     # Product reviews
+│   ├── wishlist/    # Favorites
+│   ├── contact/     # Contact messages
+│   ├── reports/     # Bug reports
+│   ├── site-settings/ # Site-wide settings
+│   └── upload/      # File uploads
+└── main.ts          # Application entry point
 ```
 
-## Compile and run the project
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full module guide and [API.md](./API.md) for endpoint documentation.
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18+
+- A Supabase project (free tier is fine)
+
+### 1. Install dependencies
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+npm install
 ```
 
-## Run tests
+### 2. Configure environment
+
+Copy the example and fill in your Supabase project details:
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+cp .env.example .env
 ```
+
+```env
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+PORT=5000
+CORS_ORIGIN=http://localhost:3000
+
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=your-strong-admin-password
+```
+
+### 3. Set up the database
+
+Run `supabase-schema.sql` (and then `supabase-migration.sql`) in the Supabase SQL Editor, or apply migrations from `supabase/migrations/`. To load sample data:
+
+```bash
+npm run seed
+```
+
+### 4. Run the server
+
+```bash
+npm run start:dev        # watch mode → http://localhost:5000/api
+```
+
+### Scripts
+
+```bash
+npm run build            # compile to dist/
+npm run start:prod       # run compiled output
+npm run lint             # ESLint (auto-fix)
+npm run test             # unit tests
+npm run test:e2e         # end-to-end tests
+npm run seed             # seed sample data
+```
+
+## Security
+
+- All admin endpoints are guarded by `AuthGuard` + `RolesGuard` with the `admin` role
+- CORS is fail-closed (only explicitly allowed origins)
+- User-scoped response cache keys prevent cross-user data leaks
+- Search inputs are sanitized to prevent PostgREST operator injection
+- Order placement caps quantities and refuses overselling (HTTP 409)
+- Uploaded images validated by file magic bytes, not just extension
 
 ## Deployment
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+The API is deployable to Vercel or any Node host.
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm run build
+npm run start:prod
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+Set the production environment variables (see `.env.example`) and make sure the frontend origin is listed in `CORS_ORIGIN`.
 
-## Resources
+## Related
 
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+- Frontend: [dhaka-wholesale-frontend](../dhaka-wholesale-frontend)

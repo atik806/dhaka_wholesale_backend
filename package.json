@@ -1,8 +1,8 @@
 {
-  "name": "cholo_kini_backend",
+  "name": "dhaka-wholesale-backend",
   "version": "0.0.1",
-  "description": "",
-  "author": "",
+  "description": "REST API for the Dhaka Wholesale e-commerce platform — NestJS + TypeScript + Supabase.",
+  "author": "Dhaka Wholesale",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {

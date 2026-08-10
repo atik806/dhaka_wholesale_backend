@@ -14,7 +14,10 @@ export const CheckoutQuoteSchema = z.object({
   items: z
     .array(QuoteItemSchema)
     .min(1)
-    .max(MAX_CHECKOUT_ITEMS, `Cart exceeds limit of ${MAX_CHECKOUT_ITEMS} items`)
+    .max(
+      MAX_CHECKOUT_ITEMS,
+      `Cart exceeds limit of ${MAX_CHECKOUT_ITEMS} items`,
+    )
     .optional(),
 });
 

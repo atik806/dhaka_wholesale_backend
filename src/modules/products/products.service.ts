@@ -324,9 +324,7 @@ export class ProductsService {
         );
       }
       this.logger.error(`Failed to delete product ${id}: ${error.message}`);
-      throw new InternalServerErrorException(
-        'Failed to delete product',
-      );
+      throw new InternalServerErrorException('Failed to delete product');
     }
 
     this.invalidateProductCaches();

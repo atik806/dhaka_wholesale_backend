@@ -46,7 +46,10 @@ export const CheckoutOrderSchema = z.object({
   items: z
     .array(CheckoutItemSchema)
     .min(1, 'Cart is empty')
-    .max(MAX_CHECKOUT_ITEMS, `Cart exceeds limit of ${MAX_CHECKOUT_ITEMS} items`),
+    .max(
+      MAX_CHECKOUT_ITEMS,
+      `Cart exceeds limit of ${MAX_CHECKOUT_ITEMS} items`,
+    ),
   notes: z.string().max(1000).optional(),
 });
 
