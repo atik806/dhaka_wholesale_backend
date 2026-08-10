@@ -327,37 +327,67 @@ export class AuthService {
 
   /**
    * Import a Supabase-client session (from the OAuth callback) into the
-   * httpOnly cookie. The access token is verified against the auth API before
-   * any cookie is set; the refresh token is stored for later /auth/refresh.
+   * httpOnly cookie. Both tokens are verified server-side before any cookie is
+   * set:
+   *   1. the access token is checked against the auth API (getUser);
+   *   2. the refresh token is exchanged via refreshSession(), which proves it
+   *      is a real, live session and rotates it; the pair is rejected unless
+   *      the refreshed session belongs to the SAME account as the access token
+   *      (H3 — an attacker can no longer plant a mismatched/foreign refresh
+   *      token in the victim's cookie jar).
+   * The cookie is populated from the server-issued session, never from the
+   * client-supplied token values.
    */
-  async syncSession(accessToken: string) {
+  async syncSession(accessToken: string, refreshToken: string) {
     const { data, error } = await this.supabase.auth.getUser(accessToken);
     if (error || !data.user) {
       throw new UnauthorizedException('Invalid or expired token');
     }
 
+    // Exchange + rotate the refresh token. A revoked, forged or otherwise
+    // invalid token makes refreshSession() fail here, so no cookie is set.
+    const { data: refreshed, error: refreshError } =
+      await this.supabase.auth.refreshSession({
+        refresh_token: refreshToken,
+      });
+    if (refreshError || !refreshed.session || !refreshed.session.user) {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+    if (refreshed.session.user.id !== data.user.id) {
+      throw new UnauthorizedException('Refresh token does not match session');
+    }
+
+    const userId = data.user.id;
+
     // Existing profiles keep their stored name/role — never overwrite them on
     // a repeat OAuth sign-in (mirrors the old getProfile-first flow). Only a
     // brand-new OAuth user with no profile row yet gets one created via
-    // syncOAuthProfile, which is role-safe (M3).
+    // syncOAuthProfile, which is role-safe.
     const { data: existing } = await this.supabaseAdmin
       .from('profiles')
       .select('id')
-      .eq('id', data.user.id)
+      .eq('id', userId)
       .maybeSingle();
 
-    if (existing) {
-      return this.getProfile(data.user.id);
-    }
+    const user = existing
+      ? await this.getProfile(userId)
+      : await this.syncOAuthProfile(
+          userId,
+          data.user.user_metadata?.full_name ??
+            data.user.user_metadata?.name ??
+            data.user.email ??
+            '',
+          data.user.email ?? '',
+        );
 
-    const oauthName =
-      data.user.user_metadata?.full_name ??
-      data.user.user_metadata?.name ??
-      data.user.email ??
-      '';
-    const oauthEmail = data.user.email ?? '';
-
-    return this.syncOAuthProfile(data.user.id, oauthName, oauthEmail);
+    return {
+      user,
+      session: {
+        access_token: refreshed.session.access_token,
+        refresh_token: refreshed.session.refresh_token,
+        expires_at: refreshed.session.expires_at,
+      },
+    };
   }
 
   async syncOAuthProfile(userId: string, name: string, email: string) {

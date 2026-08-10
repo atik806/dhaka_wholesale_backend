@@ -15,6 +15,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { AuthService } from './auth.service.js';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
+import { CookieOriginGuard } from '../../common/guards/cookie-origin.guard.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import type { JwtUser } from '../../common/decorators/current-user.decorator.js';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
@@ -43,11 +44,13 @@ const SyncProfileSchema = z.object({
  * Body for importing a Supabase-client session (OAuth callback) into the
  * httpOnly cookie. The tokens travel once, inside a JSON request body that
  * only our own origin can read — they are never exposed to JS storage.
+ * `expires_at` is deliberately not accepted: the cookie is populated from the
+ * server-issued session returned by refreshSession(), whose expiry supersedes
+ * the client's (H3).
  */
 const SyncSessionSchema = z.object({
   access_token: z.string().min(1),
   refresh_token: z.string().min(1),
-  expires_at: z.number().optional(),
 });
 type SyncSessionDto = z.infer<typeof SyncSessionSchema>;
 
@@ -132,6 +135,11 @@ export class AuthController {
 
   @Post('sync-session')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
+  // H3 defense-in-depth: this unauthenticated route SETS cookies from a
+  // body-supplied session, so a cross-origin attacker page must not be able to
+  // aim it at a logged-in victim. Origin/Referer must resolve to the CORS
+  // allowlist (see main.ts), or the request is rejected with 403.
+  @UseGuards(CookieOriginGuard)
   @ApiOperation({
     summary: 'Import a Supabase client session into httpOnly cookies',
   })
@@ -139,13 +147,14 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
     @Body(new ZodValidationPipe(SyncSessionSchema)) dto: SyncSessionDto,
   ) {
-    const result = await this.authService.syncSession(dto.access_token);
-    setAuthCookies(res, {
-      access_token: dto.access_token,
-      refresh_token: dto.refresh_token,
-      expires_at: dto.expires_at,
-    });
-    return { user: result };
+    const result = await this.authService.syncSession(
+      dto.access_token,
+      dto.refresh_token,
+    );
+    // The cookie is populated from the server-issued (rotated) session, never
+    // from the raw client-supplied token values (H3).
+    setAuthCookies(res, result.session);
+    return { user: result.user };
   }
 
   @Get('profile')
