@@ -7,6 +7,16 @@ interface CacheEntry {
 
 const MAX_ENTRIES = 500;
 
+/**
+ * In-process response cache.
+ *
+ * NOTE (serverless): on Vercel each warm lambda instance holds its own Map, so
+ * `deleteByPrefix` only busts the instance that served the write. Other warm
+ * instances keep their stale copy until it expires on its own. Route TTLs are
+ * deliberately short (<=600s) so that self-healing window stays small; anything
+ * that must be immediately consistent after a write must not be cached here.
+ */
+
 @Injectable()
 export class CacheStore {
   private readonly cache = new Map<string, CacheEntry>();

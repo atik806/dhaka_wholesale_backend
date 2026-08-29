@@ -51,6 +51,14 @@ export class ReviewsService {
   }
 
   async create(userId: string, productId: string, dto: CreateReviewDto) {
+    const { data: product } = await this.supabase
+      .from('products')
+      .select('id')
+      .eq('id', productId)
+      .maybeSingle();
+
+    if (!product) throw new NotFoundException('Product not found');
+
     const { data: existing } = await this.supabase
       .from('reviews')
       .select('id')

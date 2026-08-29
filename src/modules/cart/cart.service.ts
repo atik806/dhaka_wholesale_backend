@@ -53,14 +53,23 @@ export class CartService {
       throw new BadRequestException('Product is out of stock');
     }
 
-    const { data: existing } = await this.supabase
+    // `.eq(col, null)` sends `col=eq.null`, which never matches a SQL NULL — so
+    // a no-variant product was never recognised as already in the cart and a
+    // duplicate row was inserted (or the unique index threw). Match NULLs with
+    // `.is()` and real values with `.eq()`.
+    let existingQuery = this.supabase
       .from('cart_items')
       .select('*')
       .eq('user_id', userId)
-      .eq('product_id', dto.product_id)
-      .eq('selected_size', dto.selected_size || null)
-      .eq('selected_color', dto.selected_color || null)
-      .maybeSingle();
+      .eq('product_id', dto.product_id);
+    existingQuery = dto.selected_size
+      ? existingQuery.eq('selected_size', dto.selected_size)
+      : existingQuery.is('selected_size', null);
+    existingQuery = dto.selected_color
+      ? existingQuery.eq('selected_color', dto.selected_color)
+      : existingQuery.is('selected_color', null);
+
+    const { data: existing } = await existingQuery.maybeSingle();
 
     const nextQty = (existing?.quantity || 0) + dto.quantity;
     if (nextQty > stockQty) {

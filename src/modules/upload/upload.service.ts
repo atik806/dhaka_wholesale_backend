@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
 
@@ -25,7 +26,7 @@ export class UploadService {
       await this.bucketInitPromise;
     }
 
-    const fileName = `${Date.now()}-${crypto.randomUUID()}.${fileExt}`;
+    const fileName = `${Date.now()}-${randomUUID()}.${fileExt}`;
 
     const { error } = await this.supabase.storage
       .from(bucketName)
@@ -62,7 +63,7 @@ export class UploadService {
       await this.supabase.storage.createBucket(bucketName, { public: true });
     }
 
-    const fileName = `${Date.now()}-${crypto.randomUUID()}.${fileExt}`;
+    const fileName = `${Date.now()}-${randomUUID()}.${fileExt}`;
 
     const { error } = await this.supabase.storage
       .from(bucketName)

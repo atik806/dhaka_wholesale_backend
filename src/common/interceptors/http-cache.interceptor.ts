@@ -74,6 +74,11 @@ export class HttpCacheInterceptor {
     // (e.g. an authenticated view) must never leak to another user via
     // a shared key that ignores identity.
     const userScope = user?.sub ?? user?.id ?? 'anon';
-    return `${request.method}:${request.url}:user:${userScope}`;
+    // Strip the global `/api` prefix so keys read as `GET:/products?...`. The
+    // service-side cache busters call `deleteByPrefix('GET:/products')` /
+    // `'GET:/categories'`; leaving the prefix in made every invalidation a
+    // silent no-op and served stale listings for the full TTL.
+    const url = String(request.url).replace(/^\/api(?=\/|\?|$)/, '');
+    return `${request.method}:${url}:user:${userScope}`;
   }
 }

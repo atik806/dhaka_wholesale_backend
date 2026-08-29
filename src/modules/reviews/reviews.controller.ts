@@ -23,6 +23,18 @@ import {
   type UpdateReviewDto,
 } from './dto/create-review.dto.js';
 
+/** Parse a query-string integer, clamped to [min, max], falling back on junk. */
+function toInt(
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max = Number.MAX_SAFE_INTEGER,
+): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(n)));
+}
+
 @ApiTags('Reviews')
 @Controller()
 export class ReviewsController {
@@ -43,8 +55,8 @@ export class ReviewsController {
   ) {
     return this.reviewsService.findByProduct(
       productId,
-      page ? Math.max(1, Number(page)) : 1,
-      limit ? Math.min(50, Math.max(1, Number(limit))) : 20,
+      toInt(page, 1, 1),
+      toInt(limit, 20, 1, 50),
     );
   }
 

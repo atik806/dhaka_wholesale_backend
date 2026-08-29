@@ -174,8 +174,10 @@ export class AdminService {
 
     if (query.search) {
       const sanitized = query.search.replace(/[(),.]/g, '').slice(0, 200);
+      // `id` is a uuid column — `id.ilike` has no matching operator and throws.
+      // Cast to text so a partial order-id search works.
       sb = sb.or(
-        `id.ilike.%${sanitized}%,shipping_address->>firstName.ilike.%${sanitized}%,shipping_address->>lastName.ilike.%${sanitized}%,shipping_address->>email.ilike.%${sanitized}%`,
+        `id::text.ilike.%${sanitized}%,shipping_address->>firstName.ilike.%${sanitized}%,shipping_address->>lastName.ilike.%${sanitized}%,shipping_address->>email.ilike.%${sanitized}%`,
       );
     }
 
@@ -220,6 +222,24 @@ export class AdminService {
       throw new BadRequestException('Invalid order status');
     }
 
+    const { data: current, error: findError } = await this.supabase
+      .from('orders')
+      .select('id, status')
+      .eq('id', orderId)
+      .single();
+
+    if (findError || !current) throw new NotFoundException('Order not found');
+
+    // Reactivating a cancelled order would let stock inflate: the restock
+    // trigger already returned its units, and moving back to a non-cancelled
+    // status does NOT re-decrement. Toggling cancelled -> active -> cancelled
+    // then credits the same units again. Block the transition instead.
+    if (current.status === 'cancelled' && status !== 'cancelled') {
+      throw new BadRequestException(
+        'A cancelled order cannot be reactivated. Create a new order instead.',
+      );
+    }
+
     const { data, error } = await this.supabase
       .from('orders')
       .update({ status })
@@ -236,11 +256,29 @@ export class AdminService {
   async deleteOrder(orderId: string) {
     const { data: order } = await this.supabase
       .from('orders')
-      .select('id')
+      .select('id, status')
       .eq('id', orderId)
       .single();
 
     if (!order) throw new NotFoundException('Order not found');
+
+    // The restock trigger only fires on a status change to 'cancelled', never
+    // on DELETE. Deleting a live order (its order_items cascade away) would
+    // silently leak the stock it decremented. Cancel it first so inventory is
+    // returned through the tested trigger path, then delete.
+    if (order.status !== 'cancelled') {
+      const { error: cancelError } = await this.supabase
+        .from('orders')
+        .update({ status: 'cancelled' })
+        .eq('id', orderId);
+
+      if (cancelError) {
+        this.logger.error(
+          `Failed to restock order ${orderId} before delete: ${cancelError.message}`,
+        );
+        throw new InternalServerErrorException('An internal error occurred');
+      }
+    }
 
     const { error: orderError } = await this.supabase
       .from('orders')

@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ConflictException,
   InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import type {
   CreateOrderDto,
@@ -18,6 +19,7 @@ import {
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
   private supabase = createSupabaseAdminClient();
 
   /**
@@ -236,6 +238,19 @@ export class OrdersService {
       .from('profiles')
       .update({ shipping_address: dto.shipping_address })
       .eq('id', userId);
+
+    // Empty the server cart now that the order is durable. Best effort: the
+    // order already succeeded and the client clears its cart too, so a failure
+    // here must never surface as a failed purchase.
+    const { error: cartClearError } = await this.supabase
+      .from('cart_items')
+      .delete()
+      .eq('user_id', userId);
+    if (cartClearError) {
+      this.logger.warn(
+        `Order ${order.id} placed but cart clear failed: ${cartClearError.message}`,
+      );
+    }
 
     return this.findById(order.id, userId);
   }

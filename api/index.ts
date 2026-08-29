@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import compression from 'compression';
+import cookieParser from 'cookie-parser';
 import express from 'express';
 import * as path from 'path';
 
@@ -13,10 +14,21 @@ let app: any;
 async function bootstrap() {
   if (app) return app;
 
-  const envCheck = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'ADMIN_EMAIL', 'ADMIN_PASSWORD']
-    .filter(k => !process.env[k]);
+  // Fail closed on missing config — the same required set as src/main.ts. A
+  // half-configured deploy that "mostly" works hides broken auth / DB access
+  // behind confusing downstream errors.
+  const required = [
+    'SUPABASE_URL',
+    'SUPABASE_ANON_KEY',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'ADMIN_EMAIL',
+    'ADMIN_PASSWORD',
+  ];
+  const envCheck = required.filter((k) => !process.env[k]);
   if (envCheck.length) {
-    console.warn(`[bootstrap] Missing env vars (will fail downstream): ${envCheck.join(', ')}`);
+    throw new Error(
+      `[bootstrap] Missing required environment variables: ${envCheck.join(', ')}`,
+    );
   }
 
   const { AppModule } = await import(path.join(__dirname, '..', 'dist', 'src', 'app.module.js'));
@@ -54,6 +66,11 @@ async function bootstrap() {
     },
   }));
   app.use(compression());
+  // Parses the httpOnly `dw_session` cookie so AuthGuard can authenticate
+  // requests that carry no Authorization header. Without this `req.cookies` is
+  // undefined in the serverless runtime and every cookie-authenticated route
+  // 401s. src/main.ts registers this too — the two entrypoints must stay in sync.
+  server.use(cookieParser());
 
   app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalInterceptors(new TransformInterceptor());

@@ -12,6 +12,12 @@ import type { CookieOptions } from 'express';
  * `SameSite=Lax` requires the backend and frontend to share a registrable
  * domain (e.g. `example.com` + `api.example.com`). For genuinely cross-site
  * production deployments set `AUTH_COOKIE_SAME_SITE=None` (requires HTTPS).
+ *
+ * Both tokens ride in one JSON cookie. Supabase access tokens are ~1 KB JWTs
+ * and refresh tokens are short opaque strings (~40 chars), so the encoded
+ * cookie stays near ~1.5 KB — comfortably under the 4 KB per-cookie limit.
+ * If a future auth provider issues large refresh tokens, split these into two
+ * cookies before the combined value approaches 4 KB.
  */
 export const AUTH_COOKIE_NAME = 'dw_session';
 
