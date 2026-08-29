@@ -6,6 +6,7 @@ import {
 import type { CheckoutQuoteDto } from './dto/checkout-quote.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
 import {
+  availableStock,
   calculateShippingCost,
   calculateTax,
   roundMoney,
@@ -81,7 +82,7 @@ export class CheckoutService {
         stock_quantity: number | null;
         stock: string;
       } | null;
-      const stockQty = product?.stock_quantity ?? 0;
+      const stockQty = availableStock(product?.stock_quantity, product?.stock);
       const qty = item.quantity;
       return {
         product_id: item.product_id,
@@ -128,7 +129,7 @@ export class CheckoutService {
 
     return items.map((item) => {
       const product = productMap.get(item.product_id)!;
-      const stockQty = product.stock_quantity ?? 0;
+      const stockQty = availableStock(product.stock_quantity, product.stock);
       const totalRequested = qtyByProduct.get(item.product_id) || item.quantity;
       return {
         product_id: item.product_id,

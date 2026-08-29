@@ -12,6 +12,7 @@ import type {
 } from './dto/cart-item.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
 import {
+  availableStock,
   calculateShippingCost,
   calculateTax,
   roundMoney,
@@ -48,20 +49,23 @@ export class CartService {
       throw new NotFoundException('Product not found');
     }
 
-    const stockQty = product.stock_quantity ?? 0;
-    if (stockQty <= 0 || product.stock === 'out-of-stock') {
+    const stockQty = availableStock(product.stock_quantity, product.stock);
+    if (stockQty <= 0) {
       throw new BadRequestException('Product is out of stock');
     }
 
     // `.eq(col, null)` sends `col=eq.null`, which never matches a SQL NULL — so
-    // a no-variant product was never recognised as already in the cart and a
-    // duplicate row was inserted (or the unique index threw). Match NULLs with
-    // `.is()` and real values with `.eq()`.
+    // a no-variant product was never recognised as already in the cart. Match
+    // NULLs with `.is()` and real values with `.eq()`. Postgres also treats
+    // NULLs as distinct in the UNIQUE(user, product, size, color) index, so the
+    // old bug could leave several no-variant rows for one product — fetch all
+    // matches (oldest first) and collapse them here.
     let existingQuery = this.supabase
       .from('cart_items')
       .select('*')
       .eq('user_id', userId)
-      .eq('product_id', dto.product_id);
+      .eq('product_id', dto.product_id)
+      .order('created_at', { ascending: true });
     existingQuery = dto.selected_size
       ? existingQuery.eq('selected_size', dto.selected_size)
       : existingQuery.is('selected_size', null);
@@ -69,9 +73,14 @@ export class CartService {
       ? existingQuery.eq('selected_color', dto.selected_color)
       : existingQuery.is('selected_color', null);
 
-    const { data: existing } = await existingQuery.maybeSingle();
+    const { data: existingRows } = await existingQuery;
+    const existing = existingRows?.[0];
+    const currentQty = (existingRows ?? []).reduce(
+      (sum, row) => sum + (row.quantity || 0),
+      0,
+    );
 
-    const nextQty = (existing?.quantity || 0) + dto.quantity;
+    const nextQty = currentQty + dto.quantity;
     if (nextQty > stockQty) {
       throw new BadRequestException(
         `Only ${stockQty} unit(s) available in stock`,
@@ -79,6 +88,12 @@ export class CartService {
     }
 
     if (existing) {
+      // Drop any stale duplicate rows left by the old NULL-matching bug.
+      const staleIds = (existingRows ?? []).slice(1).map((row) => row.id);
+      if (staleIds.length > 0) {
+        await this.supabase.from('cart_items').delete().in('id', staleIds);
+      }
+
       const { data, error } = await this.supabase
         .from('cart_items')
         .update({ quantity: nextQty })
@@ -120,11 +135,11 @@ export class CartService {
 
     const { data: product } = await this.supabase
       .from('products')
-      .select('stock_quantity')
+      .select('stock, stock_quantity')
       .eq('id', existing.product_id)
       .single();
 
-    const stockQty = product?.stock_quantity ?? 0;
+    const stockQty = availableStock(product?.stock_quantity, product?.stock);
     if (dto.quantity > stockQty) {
       throw new BadRequestException(
         `Only ${stockQty} unit(s) available in stock`,
@@ -225,8 +240,8 @@ export class CartService {
         continue;
       }
 
-      const stockQty = product.stock_quantity ?? 0;
-      if (stockQty <= 0 || product.stock === 'out-of-stock') {
+      const stockQty = availableStock(product.stock_quantity, product.stock);
+      if (stockQty <= 0) {
         skipped.push({
           product_id: item.product_id,
           reason: 'Product is out of stock',

@@ -43,3 +43,24 @@ export function resolveStockQuantity(
   if (stockEnum === 'low-stock') return 3;
   return 25;
 }
+
+/**
+ * Units a customer may order right now.
+ *
+ * The admin product form only edits the `stock` enum (In / Low / Out) — there is
+ * no quantity field — while `stock_quantity` is seeded once and then decremented
+ * by the order trigger, so it drifts toward 0 (or below) over a product's life
+ * even while the shop still lists it as available. Treat the enum as the
+ * availability switch and the counter as an upper bound only while it is still
+ * positive; when the enum says available but the counter has drained, fall back
+ * to the level the enum implies.
+ */
+export function availableStock(
+  stockQuantity: number | undefined | null,
+  stockEnum?: string | null,
+): number {
+  if (stockEnum === 'out-of-stock') return 0;
+  const qty = Math.floor(stockQuantity ?? 0);
+  if (qty > 0) return qty;
+  return stockEnum === 'low-stock' ? 3 : 25;
+}

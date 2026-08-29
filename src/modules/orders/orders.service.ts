@@ -12,6 +12,7 @@ import type {
 } from './dto/create-order.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
 import {
+  availableStock,
   calculateShippingCost,
   calculateTax,
   roundMoney,
@@ -292,7 +293,10 @@ export class OrdersService {
     }>,
   ) {
     for (const item of cartItems) {
-      const stockQty = item.products?.stock_quantity ?? 0;
+      const stockQty = availableStock(
+        item.products?.stock_quantity,
+        item.products?.stock,
+      );
       const name = item.products?.name || 'Product';
       if (stockQty < item.quantity) {
         throw new BadRequestException(
@@ -306,7 +310,12 @@ export class OrdersService {
     items: Array<{ product_id: string; quantity: number }>,
     productMap: Map<
       string,
-      { id: string; name: string; stock_quantity: number | null }
+      {
+        id: string;
+        name: string;
+        stock_quantity: number | null;
+        stock?: string;
+      }
     >,
   ) {
     const qtyByProduct = new Map<string, number>();
@@ -319,7 +328,7 @@ export class OrdersService {
 
     for (const [productId, requested] of qtyByProduct) {
       const product = productMap.get(productId)!;
-      const stockQty = product.stock_quantity ?? 0;
+      const stockQty = availableStock(product.stock_quantity, product.stock);
       if (stockQty < requested) {
         throw new BadRequestException(
           `Insufficient stock for "${product.name}". Available: ${stockQty}, requested: ${requested}`,

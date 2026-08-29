@@ -263,10 +263,13 @@ export class AdminService {
     if (!order) throw new NotFoundException('Order not found');
 
     // The restock trigger only fires on a status change to 'cancelled', never
-    // on DELETE. Deleting a live order (its order_items cascade away) would
-    // silently leak the stock it decremented. Cancel it first so inventory is
-    // returned through the tested trigger path, then delete.
-    if (order.status !== 'cancelled') {
+    // on DELETE. Deleting an order whose goods never left the warehouse
+    // (pending / confirmed) would silently leak the stock it decremented, so
+    // cancel it first to return inventory through the tested trigger path.
+    // A shipped / delivered order's goods are already gone — deleting those
+    // must NOT credit stock back; a cancelled order was already restocked.
+    const RESTOCK_BEFORE_DELETE = ['pending', 'confirmed'];
+    if (RESTOCK_BEFORE_DELETE.includes(order.status)) {
       const { error: cancelError } = await this.supabase
         .from('orders')
         .update({ status: 'cancelled' })
