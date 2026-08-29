@@ -173,12 +173,22 @@ export class AdminService {
     }
 
     if (query.search) {
-      const sanitized = query.search.replace(/[(),.]/g, '').slice(0, 200);
-      // `id` is a uuid column — `id.ilike` has no matching operator and throws.
-      // Cast to text so a partial order-id search works.
-      sb = sb.or(
-        `id::text.ilike.%${sanitized}%,shipping_address->>firstName.ilike.%${sanitized}%,shipping_address->>lastName.ilike.%${sanitized}%,shipping_address->>email.ilike.%${sanitized}%`,
-      );
+      const raw = query.search.trim();
+      // `id` is a uuid column: `id.ilike` throws and `id::text.ilike` inside
+      // `.or()` is rejected by PostgREST here — so only match the id when the
+      // whole uuid is given, and search the customer text fields otherwise.
+      const isUuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          raw,
+        );
+      if (isUuid) {
+        sb = sb.eq('id', raw);
+      } else {
+        const sanitized = raw.replace(/[(),.:*%]/g, '').slice(0, 200);
+        sb = sb.or(
+          `shipping_address->>firstName.ilike.%${sanitized}%,shipping_address->>lastName.ilike.%${sanitized}%,shipping_address->>email.ilike.%${sanitized}%`,
+        );
+      }
     }
 
     const { data, error, count } = await sb
