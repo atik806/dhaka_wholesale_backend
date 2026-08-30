@@ -44,8 +44,8 @@ export class AdminService {
       { count: totalProducts },
       { count: totalOrders },
       { count: totalUsers },
-      { data: revenueAgg },
-      { data: chartOrders },
+      { data: revenueAgg, error: revenueError },
+      { data: chartOrders, error: chartError },
       { data: recentOrders },
       { data: lowStockProducts },
       { count: pendingOrders },
@@ -86,6 +86,13 @@ export class AdminService {
         .select('id', { count: 'exact', head: true })
         .eq('status', 'pending'),
     ]);
+
+    if (revenueError)
+      this.logger.warn(
+        `Dashboard revenue query failed: ${revenueError.message}`,
+      );
+    if (chartError)
+      this.logger.warn(`Dashboard chart query failed: ${chartError.message}`);
 
     const revenueRow = Array.isArray(revenueAgg) ? revenueAgg[0] : revenueAgg;
     const rawSum =

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -11,6 +12,14 @@ import { createSupabaseAdminClient } from '../../config/supabase.config.js';
  * reads exactly one public key today: `promo_banner`.
  */
 const PUBLIC_SETTINGS_KEYS = ['promo_banner'];
+
+/**
+ * Keys an admin write is allowed to create/update. The write path uses the
+ * service-role client (RLS is bypassed), so without this an admin request
+ * could seed arbitrary rows into `site_settings`. Extend this list when a new
+ * setting is actually wired up.
+ */
+const WRITABLE_SETTINGS_KEYS = ['promo_banner'];
 
 @Injectable()
 export class SiteSettingsService {
@@ -52,6 +61,10 @@ export class SiteSettingsService {
   }
 
   async update(key: string, value: Record<string, unknown>, userId?: string) {
+    if (!WRITABLE_SETTINGS_KEYS.includes(key)) {
+      throw new BadRequestException(`Unknown site setting: ${key}`);
+    }
+
     const updatePayload: Record<string, unknown> = {
       value,
       updated_at: new Date().toISOString(),
@@ -70,6 +83,19 @@ export class SiteSettingsService {
   }
 
   async updateMany(settings: Record<string, unknown>, userId?: string) {
+    const keys = Object.keys(settings);
+    if (keys.length === 0) {
+      throw new BadRequestException('No settings provided');
+    }
+    const unknownKeys = keys.filter(
+      (key) => !WRITABLE_SETTINGS_KEYS.includes(key),
+    );
+    if (unknownKeys.length > 0) {
+      throw new BadRequestException(
+        `Unknown site setting(s): ${unknownKeys.join(', ')}`,
+      );
+    }
+
     const updates = Object.entries(settings).map(([key, value]) => ({
       key,
       value,
