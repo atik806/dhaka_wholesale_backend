@@ -60,9 +60,13 @@ const PaginationQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(1000).optional().default(10),
 });
 
+// `from` / `to` are interpolated into `created_at` range filters. Accept only
+// ISO-8601 datetimes (what the admin UI sends via `Date.toISOString()`), so a
+// malformed value fails fast with a 400 here instead of surfacing as a silent
+// PostgREST error that renders the dashboard as zeros.
 const DashboardQuerySchema = z.object({
-  from: z.string().optional(),
-  to: z.string().optional(),
+  from: z.iso.datetime({ offset: true }).optional(),
+  to: z.iso.datetime({ offset: true }).optional(),
 });
 
 const OrdersQuerySchema = PaginationQuerySchema.extend({
