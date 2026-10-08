@@ -81,6 +81,10 @@ CORS_ORIGIN=http://localhost:3000
 
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=your-strong-admin-password
+
+# Optional locally, recommended in production — shared rate-limit counters
+UPSTASH_REDIS_REST_URL=
+UPSTASH_REDIS_REST_TOKEN=
 ```
 
 ### 3. Set up the database
@@ -116,6 +120,7 @@ npm run seed             # seed sample data
 - Search inputs are sanitized to prevent PostgREST operator injection
 - Order placement caps quantities and refuses overselling (HTTP 409)
 - Uploaded images validated by file magic bytes, not just extension
+- Rate limits (login, register, contact, reports, uploads) are keyed by client IP and stored in Upstash Redis, so they hold across serverless instances; without Upstash configured they fall back to per-process memory
 
 ## Deployment
 
@@ -126,7 +131,7 @@ npm run build
 npm run start:prod
 ```
 
-Set the production environment variables (see `.env.example`) and make sure the frontend origin is listed in `CORS_ORIGIN`.
+Set the production environment variables (see `.env.example`) and make sure the frontend origin is listed in `CORS_ORIGIN`. On Vercel, also set `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` — in-memory rate limits reset on every cold start and aren't shared between instances.
 
 ## Related
 
