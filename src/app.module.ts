@@ -19,6 +19,8 @@ import { ReportsModule } from './modules/reports/reports.module.js';
 import { SiteSettingsModule } from './modules/site-settings/site-settings.module.js';
 import { CacheModule } from './common/cache/cache.module.js';
 import { HttpCacheInterceptor } from './common/interceptors/http-cache.interceptor.js';
+import { createThrottlerStorage } from './common/throttler/upstash-throttler.storage.js';
+import { clientIpTracker } from './common/throttler/client-ip.tracker.js';
 
 @Module({
   imports: [
@@ -26,12 +28,17 @@ import { HttpCacheInterceptor } from './common/interceptors/http-cache.intercept
       isGlobal: true,
     }),
     CacheModule,
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000,
-        limit: 60,
-      },
-    ]),
+    ThrottlerModule.forRoot({
+      throttlers: [
+        {
+          ttl: 60000,
+          limit: 60,
+        },
+      ],
+      // Shared Upstash counters in production; in-memory when unconfigured.
+      storage: createThrottlerStorage(),
+      getTracker: clientIpTracker,
+    }),
     AuthModule,
     CategoriesModule,
     ProductsModule,
