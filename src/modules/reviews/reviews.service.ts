@@ -9,10 +9,13 @@ import type {
   UpdateReviewDto,
 } from './dto/create-review.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import { CacheStore } from '../../common/cache/cache-store.js';
 
 @Injectable()
 export class ReviewsService {
   private supabase = createSupabaseAdminClient();
+
+  constructor(private readonly cacheStore: CacheStore) {}
 
   async findRecent(limit = 6) {
     const { data, error } = await this.supabase
@@ -82,6 +85,7 @@ export class ReviewsService {
 
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
+    this.invalidateReviewCaches(productId);
     return data;
   }
 
@@ -105,6 +109,7 @@ export class ReviewsService {
 
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
+    this.invalidateReviewCaches(review.product_id);
     return data;
   }
 
@@ -125,6 +130,12 @@ export class ReviewsService {
       .eq('id', reviewId);
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
+    this.invalidateReviewCaches(review.product_id);
     return { message: 'Review deleted successfully' };
+  }
+
+  private invalidateReviewCaches(productId: string): void {
+    this.cacheStore.deleteByPrefix('GET:/reviews/recent');
+    this.cacheStore.deleteByPrefix(`GET:/products/${productId}/reviews`);
   }
 }

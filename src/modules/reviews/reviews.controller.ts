@@ -16,6 +16,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import type { JwtUser } from '../../common/decorators/current-user.decorator.js';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
 import { UuidParamPipe } from '../../common/pipes/uuid-param.pipe.js';
+import { CacheTTL } from '../../common/decorators/cache.decorator.js';
 import {
   CreateReviewSchema,
   UpdateReviewSchema,
@@ -41,12 +42,14 @@ export class ReviewsController {
   constructor(private readonly reviewsService: ReviewsService) {}
 
   @Get('reviews/recent')
+  @CacheTTL(60)
   @ApiOperation({ summary: 'Get recent reviews across all products' })
   async findRecent() {
     return this.reviewsService.findRecent();
   }
 
   @Get('products/:productId/reviews')
+  @CacheTTL(60)
   @ApiOperation({ summary: 'Get reviews for a product' })
   async findByProduct(
     @Param('productId', UuidParamPipe) productId: string,

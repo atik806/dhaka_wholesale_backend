@@ -6,11 +6,15 @@ import {
   Logger,
 } from '@nestjs/common';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import { CacheStore } from '../../common/cache/cache-store.js';
+import { profileCacheKey } from '../../common/guards/auth.guard.js';
 
 @Injectable()
 export class AdminService {
   private readonly logger = new Logger(AdminService.name);
   private supabase = createSupabaseAdminClient();
+
+  constructor(private readonly cacheStore: CacheStore) {}
 
   async getDashboardStats(query?: { from?: string; to?: string }) {
     // Chart window: never pull more than 30 days of order rows for the trend
@@ -432,6 +436,7 @@ export class AdminService {
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
     if (!data) throw new NotFoundException('User not found');
+    this.cacheStore.delete(profileCacheKey(userId));
     return data;
   }
 
@@ -448,6 +453,7 @@ export class AdminService {
       throw new InternalServerErrorException('Failed to delete user profile');
     }
 
+    this.cacheStore.delete(profileCacheKey(userId));
     return { message: 'User deleted successfully' };
   }
 

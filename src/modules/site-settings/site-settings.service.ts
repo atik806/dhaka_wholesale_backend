@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import { CacheStore } from '../../common/cache/cache-store.js';
 
 /**
  * Keys the public (unauthenticated) GET endpoints may expose. Everything
@@ -24,6 +25,8 @@ const WRITABLE_SETTINGS_KEYS = ['promo_banner'];
 @Injectable()
 export class SiteSettingsService {
   private supabase = createSupabaseAdminClient();
+
+  constructor(private readonly cacheStore: CacheStore) {}
 
   async getAll() {
     const { data, error } = await this.supabase
@@ -79,6 +82,7 @@ export class SiteSettingsService {
 
     if (error)
       throw new InternalServerErrorException('Failed to update site setting');
+    this.invalidateSettingsCache();
     return data;
   }
 
@@ -110,6 +114,11 @@ export class SiteSettingsService {
 
     if (error)
       throw new InternalServerErrorException('Failed to update site settings');
+    this.invalidateSettingsCache();
     return data;
+  }
+
+  private invalidateSettingsCache(): void {
+    this.cacheStore.deleteByPrefix('GET:/site-settings');
   }
 }

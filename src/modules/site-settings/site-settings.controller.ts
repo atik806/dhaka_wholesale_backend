@@ -13,6 +13,7 @@ import { SiteSettingsService } from './site-settings.service.js';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
+import { CacheTTL } from '../../common/decorators/cache.decorator.js';
 
 @ApiTags('Site Settings')
 @Controller('site-settings')
@@ -20,12 +21,14 @@ export class SiteSettingsController {
   constructor(private readonly siteSettingsService: SiteSettingsService) {}
 
   @Get()
+  @CacheTTL(300)
   @ApiOperation({ summary: 'Get all site settings (public)' })
   async getAll() {
     return this.siteSettingsService.getAll();
   }
 
   @Get(':key')
+  @CacheTTL(300)
   @ApiOperation({ summary: 'Get a specific site setting (public)' })
   async get(@Param('key') key: string) {
     return this.siteSettingsService.get(key);

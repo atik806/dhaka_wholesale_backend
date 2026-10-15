@@ -32,7 +32,9 @@ export class UploadService {
       .from(bucketName)
       .upload(fileName, file.buffer, {
         contentType: file.mimetype,
-        cacheControl: '3600',
+        // Filenames are timestamp+UUID with upsert:false, so a given URL's
+        // content never changes — safe to cache for a year.
+        cacheControl: '31536000',
         upsert: false,
       });
 
@@ -69,7 +71,7 @@ export class UploadService {
       .from(bucketName)
       .upload(fileName, file.buffer, {
         contentType: file.mimetype,
-        cacheControl: '3600',
+        cacheControl: '31536000',
         upsert: false,
       });
 

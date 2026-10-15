@@ -11,12 +11,24 @@ import {
   createSupabaseAdminClient,
 } from '../../config/supabase.config.js';
 import { readAuthCookies } from '../auth/auth-cookies.js';
+import { CacheStore } from '../cache/cache-store.js';
+
+/** How long a `profiles` (name/role) lookup may be served from cache. Bounds
+ * how stale a just-changed role can appear; role writes also proactively
+ * bust this key, so this TTL is only the fallback ceiling. */
+const PROFILE_CACHE_TTL_SECONDS = 30;
+
+export function profileCacheKey(userId: string): string {
+  return `profile:${userId}`;
+}
 
 @Injectable()
 export class AuthGuard implements CanActivate {
   private readonly logger = new Logger(AuthGuard.name);
   private _supabase: ReturnType<typeof createSupabaseClient>;
   private _supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>;
+
+  constructor(private readonly cacheStore: CacheStore) {}
 
   private get supabase() {
     if (!this._supabase) this._supabase = createSupabaseClient();
@@ -51,18 +63,31 @@ export class AuthGuard implements CanActivate {
 
     let name: string;
     let role: string;
-    try {
-      const { data } = await this.supabaseAdmin
-        .from('profiles')
-        .select('name, role')
-        .eq('id', user.id)
-        .single();
-      name = data?.name ?? user.email ?? '';
-      role = data?.role ?? 'customer';
-    } catch (e) {
-      this.logger.warn(`Profile query failed for ${user.id}: ${e}`);
-      name = user.email ?? '';
-      role = 'customer';
+    const cacheKey = profileCacheKey(user.id);
+    const cached = this.cacheStore.get(cacheKey) as
+      { name: string; role: string } | undefined;
+    if (cached) {
+      name = cached.name;
+      role = cached.role;
+    } else {
+      try {
+        const { data } = await this.supabaseAdmin
+          .from('profiles')
+          .select('name, role')
+          .eq('id', user.id)
+          .single();
+        name = data?.name ?? user.email ?? '';
+        role = data?.role ?? 'customer';
+        this.cacheStore.set(
+          cacheKey,
+          { name, role },
+          PROFILE_CACHE_TTL_SECONDS,
+        );
+      } catch (e) {
+        this.logger.warn(`Profile query failed for ${user.id}: ${e}`);
+        name = user.email ?? '';
+        role = 'customer';
+      }
     }
 
     (
