@@ -1,5 +1,6 @@
 import {
   Injectable,
+  BadRequestException,
   ConflictException,
   UnauthorizedException,
   InternalServerErrorException,
@@ -9,8 +10,10 @@ import {
 import type { RegisterDto } from './dto/register.dto.js';
 import type { LoginDto } from './dto/login.dto.js';
 import type { UpdateProfileDto } from './dto/update-profile.dto.js';
+import type { ChangeAdminPasswordDto } from './dto/change-admin-password.dto.js';
 import {
   createSupabaseClient,
+  createSupabaseAuthClient,
   createSupabaseAdminClient,
 } from '../../config/supabase.config.js';
 
@@ -218,65 +221,54 @@ export class AuthService {
   }
 
   async adminLogin(dto: LoginDto) {
-    const adminEmail = process.env.ADMIN_EMAIL;
-    const adminPassword = process.env.ADMIN_PASSWORD;
+    const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+    const bootstrapPassword = process.env.ADMIN_PASSWORD;
 
-    // Use a temporary anon client for sign-in so we never pollute
-    // the shared admin client's auth state. The shared admin client
-    // must stay unauthenticated so it bypasses RLS via service_role key.
-    const signInClient = createSupabaseClient();
+    // Use a temporary anon client for sign-in so we never pollute the shared
+    // service-role client's auth state.
+    const signInClient = createSupabaseAuthClient();
 
-    // Admin access is fail-closed: it requires ADMIN_EMAIL and
-    // ADMIN_PASSWORD to be configured. Without them we refuse rather
-    // than falling back to "any profile with role=admin" — that path
-    // made the admin role itself the whole security boundary, which
-    // the RLS hardening (role column no longer client-writable) is
-    // specifically designed to protect.
-    if (!adminEmail || !adminPassword) {
+    // ADMIN_EMAIL is the allowlist. ADMIN_PASSWORD is only a bootstrap secret
+    // for creating the account when it does not exist yet; after that,
+    // Supabase is the password source of truth so admins can rotate/recover it.
+    if (!adminEmail || !bootstrapPassword) {
       this.logger.error(
         'ADMIN_EMAIL / ADMIN_PASSWORD are not set — admin login disabled',
       );
       throw new UnauthorizedException('Admin login is not configured');
     }
 
-    if (dto.email !== adminEmail || dto.password !== adminPassword) {
+    if (dto.email.trim().toLowerCase() !== adminEmail) {
       throw new UnauthorizedException('Invalid admin credentials');
     }
 
-    // Try sign-in first
     let sessionResult: { user: any; session: any } | null = null;
     const { data: signInData, error: signInError } =
       await signInClient.auth.signInWithPassword({
-        email: dto.email,
+        email: adminEmail,
         password: dto.password,
       });
 
-    // If the admin account doesn't exist in Supabase yet, create it
+    // A failed login may mean either a missing account or a wrong password.
+    // Only the deployment bootstrap password may create the privileged user.
     if (signInError) {
+      if (dto.password !== bootstrapPassword) {
+        throw new UnauthorizedException('Invalid admin credentials');
+      }
+
       const { data: created, error: createError } =
         await this.supabaseAdmin.auth.admin.createUser({
-          email: dto.email,
+          email: adminEmail,
           password: dto.password,
           email_confirm: true,
         });
-      if (createError) {
+      if (createError || !created.user) {
         throw new UnauthorizedException('Admin login failed');
       }
 
-      await this.supabaseAdmin.from('profiles').upsert(
-        {
-          id: created.user.id,
-          email: dto.email,
-          role: 'admin',
-          name: 'Admin',
-        },
-        { onConflict: 'id' },
-      );
-
-      // Sign in after creating the account
       const { data: retryData, error: retryError } =
         await signInClient.auth.signInWithPassword({
-          email: dto.email,
+          email: adminEmail,
           password: dto.password,
         });
       if (retryError) {
@@ -291,10 +283,15 @@ export class AuthService {
       throw new UnauthorizedException('Admin login failed');
     }
 
+    // The configured email remains the authorization boundary. Keeping its
+    // role synchronized lets the regular AuthGuard/RolesGuard protect all
+    // subsequent admin requests, including after password recovery.
+    await this.ensureAdminProfile(sessionResult.user.id, adminEmail);
+
     return {
       user: {
         id: sessionResult.user.id,
-        email: dto.email,
+        email: adminEmail,
         name: 'Admin',
         role: 'admin' as const,
         phone: null,
@@ -307,6 +304,72 @@ export class AuthService {
         expires_at: sessionResult.session.expires_at,
       },
     };
+  }
+
+  async changeAdminPassword(
+    userId: string,
+    email: string,
+    dto: ChangeAdminPasswordDto,
+  ) {
+    // A stolen but still-live admin cookie is not enough to rotate the
+    // password: the current password must also be verified with Supabase.
+    const verificationClient = createSupabaseAuthClient();
+    const { data: verified, error: verifyError } =
+      await verificationClient.auth.signInWithPassword({
+        email,
+        password: dto.current_password,
+      });
+
+    if (verifyError || !verified.user || verified.user.id !== userId) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    const { error: updateError } =
+      await this.supabaseAdmin.auth.admin.updateUserById(userId, {
+        password: dto.new_password,
+      });
+    if (updateError) {
+      this.logger.error(
+        `Failed to change admin password for ${userId}: ${updateError.message}`,
+      );
+      throw new InternalServerErrorException('Could not update password');
+    }
+
+    // Invalidate refresh tokens after rotation. The controller also clears the
+    // browser cookie, forcing a new login with the replacement password.
+    if (verified.session?.access_token) {
+      try {
+        await this.supabaseAdmin.auth.admin.signOut(
+          verified.session.access_token,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Session revoke failed after admin password change: ${error}`,
+        );
+      }
+    }
+
+    return {
+      message: 'Password updated. Sign in again with your new password.',
+    };
+  }
+
+  private async ensureAdminProfile(userId: string, email: string) {
+    const { error } = await this.supabaseAdmin.from('profiles').upsert(
+      {
+        id: userId,
+        email,
+        role: 'admin',
+        name: 'Admin',
+      },
+      { onConflict: 'id' },
+    );
+    if (error) {
+      this.logger.error(
+        `Failed to sync admin profile for ${userId}: ${error.message} (${error.code})`,
+      );
+      throw new InternalServerErrorException('Admin profile setup failed');
+    }
   }
 
   /**

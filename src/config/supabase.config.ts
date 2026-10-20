@@ -8,6 +8,16 @@ const REQUEST_TIMEOUT_MS = 30_000;
 export function createSupabaseClient(): SupabaseClient {
   if (_anonClient) return _anonClient;
 
+  _anonClient = createSupabaseAuthClient();
+  return _anonClient;
+}
+
+/**
+ * Create an isolated anon-key client for a password sign-in attempt. Supabase
+ * clients keep auth state in memory even when persistence is disabled, so
+ * request-scoped verification must not reuse the process-wide data client.
+ */
+export function createSupabaseAuthClient(): SupabaseClient {
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 
@@ -20,7 +30,7 @@ export function createSupabaseClient(): SupabaseClient {
     );
   }
 
-  _anonClient = createClient(supabaseUrl, supabaseAnonKey, {
+  return createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
@@ -44,8 +54,6 @@ export function createSupabaseClient(): SupabaseClient {
       },
     },
   });
-
-  return _anonClient;
 }
 
 export function createSupabaseAdminClient(): SupabaseClient {
