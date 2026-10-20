@@ -15,9 +15,11 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { AuthService } from './auth.service.js';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
+import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { CookieOriginGuard } from '../../common/guards/cookie-origin.guard.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import type { JwtUser } from '../../common/decorators/current-user.decorator.js';
+import { Roles } from '../../common/decorators/roles.decorator.js';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
 import { RegisterSchema, type RegisterDto } from './dto/register.dto.js';
 import { LoginSchema, type LoginDto } from './dto/login.dto.js';
@@ -29,6 +31,10 @@ import {
   UpdateProfileSchema,
   type UpdateProfileDto,
 } from './dto/update-profile.dto.js';
+import {
+  ChangeAdminPasswordSchema,
+  type ChangeAdminPasswordDto,
+} from './dto/change-admin-password.dto.js';
 import {
   setAuthCookies,
   clearAuthCookies,
@@ -101,6 +107,27 @@ export class AuthController {
     const result = await this.authService.adminLogin(dto);
     setAuthCookies(res, result.session);
     return { user: result.user };
+  }
+
+  @Patch('admin-password')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Change the signed-in admin password' })
+  async changeAdminPassword(
+    @CurrentUser() user: JwtUser,
+    @Res({ passthrough: true }) res: Response,
+    @Body(new ZodValidationPipe(ChangeAdminPasswordSchema))
+    dto: ChangeAdminPasswordDto,
+  ) {
+    const result = await this.authService.changeAdminPassword(
+      user.id,
+      user.email,
+      dto,
+    );
+    clearAuthCookies(res);
+    return result;
   }
 
   @Post('refresh')
