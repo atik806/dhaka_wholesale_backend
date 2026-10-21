@@ -18,7 +18,9 @@ import {
   availableStock,
   calculateShippingCost,
   calculateTax,
+  resolveVariant,
   roundMoney,
+  type VariantOptions,
 } from '../../common/utils/commerce.js';
 import { canTransitionOrder } from './order-state.js';
 
@@ -158,6 +160,29 @@ export class OrdersService {
   }
 
   /**
+   * Validated size/colour for each line, in line order. Fails the whole
+   * request on the first invalid choice so nothing is stored.
+   */
+  private resolveVariants(
+    lines: Array<{
+      product: VariantOptions | null | undefined;
+      selected_size?: string | null;
+      selected_color?: string | null;
+    }>,
+  ) {
+    return lines.map((line) => {
+      const variant = resolveVariant(
+        line.product ?? {},
+        line.selected_size,
+        line.selected_color,
+      );
+      if (variant.error !== undefined)
+        throw new BadRequestException(variant.error);
+      return variant;
+    });
+  }
+
+  /**
    * Empty the server cart once the order is committed. Best effort: the
    * order already succeeded, so a failure here is logged, never surfaced
    * as a failed purchase and never undoes the order.
@@ -211,7 +236,9 @@ export class OrdersService {
   async create(userId: string, dto: CreateOrderDto) {
     const { data: cartItems, error: cartError } = await this.supabase
       .from('cart_items')
-      .select('*, products(id, name, price, images, stock_quantity, stock)')
+      .select(
+        '*, products(id, name, price, images, stock_quantity, stock, sizes, colors)',
+      )
       .eq('user_id', userId);
 
     if (cartError)
@@ -229,6 +256,9 @@ export class OrdersService {
         );
     }
     this.assertCartStock(cartItems);
+    const variants = this.resolveVariants(
+      cartItems.map((item) => ({ ...item, product: item.products })),
+    );
 
     const promotion = await this.promotions.apply(
       cartItems.map((item) => ({
@@ -252,8 +282,8 @@ export class OrdersService {
           price: priced.price,
           original_price: item.products?.price || 0,
           quantity: priced.quantity,
-          selected_size: item.selected_size ?? null,
-          selected_color: item.selected_color ?? null,
+          selected_size: variants[priced.line_index].size,
+          selected_color: variants[priced.line_index].color,
         };
       }),
     });
@@ -266,7 +296,7 @@ export class OrdersService {
     const productIds = dto.items.map((i) => i.product_id);
     const { data: products, error: prodError } = await this.supabase
       .from('products')
-      .select('id, name, price, images, stock_quantity, stock')
+      .select('id, name, price, images, stock_quantity, stock, sizes, colors')
       .in('id', productIds);
 
     if (prodError)
@@ -278,6 +308,12 @@ export class OrdersService {
     const pricedProducts = await this.offers.priceProducts(products);
     const productMap = new Map(pricedProducts.map((p) => [p.id, p]));
     this.assertCheckoutStock(dto.items, productMap);
+    const variants = this.resolveVariants(
+      dto.items.map((item) => ({
+        ...item,
+        product: productMap.get(item.product_id),
+      })),
+    );
 
     const promotion = await this.promotions.apply(
       dto.items.map((item) => ({
@@ -302,8 +338,8 @@ export class OrdersService {
           price: priced.price,
           original_price: product.price,
           quantity: priced.quantity,
-          selected_size: item.selected_size || null,
-          selected_color: item.selected_color || null,
+          selected_size: variants[priced.line_index].size,
+          selected_color: variants[priced.line_index].color,
         };
       }),
     });
