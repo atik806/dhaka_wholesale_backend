@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CouponCodeSchema } from '../../offers/promotions-pricing.js';
 import { MAX_CHECKOUT_ITEMS } from '../../orders/dto/create-order.dto.js';
 
 const QuoteItemSchema = z.object({
@@ -7,6 +8,7 @@ const QuoteItemSchema = z.object({
 });
 
 export const CheckoutQuoteSchema = z.object({
+  coupon_code: CouponCodeSchema,
   delivery_zone: z
     .enum(['inside_dhaka', 'outside_dhaka'])
     .default('inside_dhaka'),

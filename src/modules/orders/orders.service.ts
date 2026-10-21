@@ -11,6 +11,8 @@ import type {
   CheckoutOrderDto,
 } from './dto/create-order.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import { OffersService } from '../offers/offers.service.js';
+import { PromotionsService } from '../offers/promotions.service.js';
 import {
   availableStock,
   calculateShippingCost,
@@ -22,6 +24,10 @@ import {
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
   private supabase = createSupabaseAdminClient();
+  constructor(
+    private readonly offers: OffersService,
+    private readonly promotions: PromotionsService,
+  ) {}
 
   /**
    * The decrement_stock trigger fails the order_items insert with a
@@ -96,15 +102,37 @@ export class OrdersService {
       throw new BadRequestException('Cart is empty');
     }
 
+    const prices = await this.offers.prices();
+    for (const item of cartItems) {
+      if (item.products)
+        item.products.price = Math.min(
+          item.products.price,
+          prices.get(item.products.id) ?? item.products.price,
+        );
+    }
     this.assertCartStock(cartItems);
 
-    const subtotal = cartItems.reduce(
-      (sum, item) => sum + (item.products?.price || 0) * item.quantity,
-      0,
+    const promotion = await this.promotions.apply(
+      cartItems.map((item) => ({
+        product_id: item.product_id,
+        price: item.products?.price || 0,
+        quantity: item.quantity,
+      })),
+      dto.coupon_code,
     );
+    const subtotal = promotion.subtotal;
     const shippingCost = calculateShippingCost(dto.delivery_zone);
     const tax = calculateTax(subtotal);
     const total = subtotal + shippingCost + tax;
+
+    if (
+      dto.expected_total !== undefined &&
+      Math.abs(roundMoney(total) - dto.expected_total) > 0.005
+    ) {
+      throw new ConflictException(
+        'Checkout totals changed. Review the updated total and place your order again.',
+      );
+    }
 
     const { data: order, error: orderError } = await this.supabase
       .from('orders')
@@ -126,16 +154,19 @@ export class OrdersService {
     if (orderError)
       throw new InternalServerErrorException('Failed to create order');
 
-    const orderItems = cartItems.map((item) => ({
-      order_id: order.id,
-      product_id: item.product_id,
-      product_name: item.products?.name || '',
-      product_image: item.products?.images?.[0] || null,
-      price: item.products?.price || 0,
-      quantity: item.quantity,
-      selected_size: item.selected_size,
-      selected_color: item.selected_color,
-    }));
+    const orderItems = promotion.priced_lines.map((priced) => {
+      const item = cartItems[priced.line_index];
+      return {
+        order_id: order.id,
+        product_id: item.product_id,
+        product_name: item.products?.name || '',
+        product_image: item.products?.images?.[0] || null,
+        price: priced.price,
+        quantity: priced.quantity,
+        selected_size: item.selected_size,
+        selected_color: item.selected_color,
+      };
+    });
 
     const { error: itemsError } = await this.supabase
       .from('order_items')
@@ -179,16 +210,31 @@ export class OrdersService {
       throw new BadRequestException('One or more products are invalid');
     }
 
-    const productMap = new Map(products.map((p) => [p.id, p]));
+    const pricedProducts = await this.offers.priceProducts(products);
+    const productMap = new Map(pricedProducts.map((p) => [p.id, p]));
     this.assertCheckoutStock(dto.items, productMap);
 
-    const subtotal = dto.items.reduce((sum, item) => {
-      const product = productMap.get(item.product_id)!;
-      return sum + product.price * item.quantity;
-    }, 0);
+    const promotion = await this.promotions.apply(
+      dto.items.map((item) => ({
+        product_id: item.product_id,
+        price: productMap.get(item.product_id)!.price,
+        quantity: item.quantity,
+      })),
+      dto.coupon_code,
+    );
+    const subtotal = promotion.subtotal;
     const shippingCost = calculateShippingCost(dto.delivery_zone);
     const tax = calculateTax(subtotal);
     const total = subtotal + shippingCost + tax;
+
+    if (
+      dto.expected_total !== undefined &&
+      Math.abs(roundMoney(total) - dto.expected_total) > 0.005
+    ) {
+      throw new ConflictException(
+        'Checkout totals changed. Review the updated total and place your order again.',
+      );
+    }
 
     const { data: order, error: orderError } = await this.supabase
       .from('orders')
@@ -210,15 +256,16 @@ export class OrdersService {
     if (orderError)
       throw new InternalServerErrorException('Failed to create order');
 
-    const orderItems = dto.items.map((item) => {
+    const orderItems = promotion.priced_lines.map((priced) => {
+      const item = dto.items[priced.line_index];
       const product = productMap.get(item.product_id)!;
       return {
         order_id: order.id,
         product_id: item.product_id,
         product_name: product.name,
         product_image: product.images?.[0] || null,
-        price: product.price,
-        quantity: item.quantity,
+        price: priced.price,
+        quantity: priced.quantity,
         selected_size: item.selected_size || null,
         selected_color: item.selected_color || null,
       };

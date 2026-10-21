@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import { PromoBannerSchema } from './promo-banner.schema.js';
 
 /**
  * Keys the public (unauthenticated) GET endpoints may expose. Everything
@@ -24,6 +25,20 @@ const WRITABLE_SETTINGS_KEYS = ['promo_banner'];
 @Injectable()
 export class SiteSettingsService {
   private supabase = createSupabaseAdminClient();
+
+  private validateValue(value: unknown) {
+    const result = PromoBannerSchema.safeParse(value);
+    if (!result.success) {
+      throw new BadRequestException({
+        message: 'Invalid promo banner settings',
+        errors: result.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+    return result.data;
+  }
 
   async getAll() {
     const { data, error } = await this.supabase
@@ -66,7 +81,7 @@ export class SiteSettingsService {
     }
 
     const updatePayload: Record<string, unknown> = {
-      value,
+      value: this.validateValue(value),
       updated_at: new Date().toISOString(),
     };
     if (userId) updatePayload.updated_by = userId;
@@ -83,6 +98,9 @@ export class SiteSettingsService {
   }
 
   async updateMany(settings: Record<string, unknown>, userId?: string) {
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+      throw new BadRequestException('Request body must be a JSON object');
+    }
     const keys = Object.keys(settings);
     if (keys.length === 0) {
       throw new BadRequestException('No settings provided');
@@ -98,7 +116,7 @@ export class SiteSettingsService {
 
     const updates = Object.entries(settings).map(([key, value]) => ({
       key,
-      value,
+      value: this.validateValue(value),
       updated_by: userId,
       updated_at: new Date().toISOString(),
     }));

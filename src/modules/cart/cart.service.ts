@@ -11,6 +11,8 @@ import type {
   MergeCartDto,
 } from './dto/cart-item.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import { OffersService } from '../offers/offers.service.js';
+import { PromotionsService } from '../offers/promotions.service.js';
 import {
   availableStock,
   calculateShippingCost,
@@ -23,6 +25,10 @@ import {
 export class CartService {
   private readonly logger = new Logger(CartService.name);
   private supabase = createSupabaseAdminClient();
+  constructor(
+    private readonly offers: OffersService,
+    private readonly promotions: PromotionsService,
+  ) {}
 
   async findByUser(userId: string) {
     const { data, error } = await this.supabase
@@ -35,7 +41,24 @@ export class CartService {
 
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
-    return data || [];
+    const prices = await this.offers.prices();
+    return (data || []).map((item) => {
+      // PostgREST types embedded relations as an array; this FK is singular.
+      const product = item.products as unknown as {
+        id: string;
+        price: number;
+        original_price?: number | null;
+      } | null;
+      const price = product ? prices.get(product.id) : undefined;
+      if (product && price !== undefined && price < product.price) {
+        product.original_price = Math.max(
+          product.original_price ?? 0,
+          product.price,
+        );
+        product.price = price;
+      }
+      return item;
+    });
   }
 
   async addItem(userId: string, dto: AddCartItemDto) {
@@ -307,10 +330,15 @@ export class CartService {
   ) {
     const items = await this.findByUser(userId);
 
-    const subtotal = items.reduce(
-      (sum, item) => sum + ((item.products as any)?.price || 0) * item.quantity,
-      0,
+    const promotion = await this.promotions.apply(
+      items.map((item) => ({
+        product_id: item.product_id,
+        price:
+          (item.products as unknown as { price: number } | null)?.price ?? 0,
+        quantity: item.quantity,
+      })),
     );
+    const subtotal = promotion.subtotal;
     const shippingCost = calculateShippingCost(deliveryZone);
     const tax = calculateTax(subtotal);
     const total = subtotal + shippingCost + tax;
@@ -319,6 +347,10 @@ export class CartService {
       items,
       delivery_zone: deliveryZone,
       subtotal: roundMoney(subtotal),
+      original_subtotal: promotion.original_subtotal,
+      combo_discount: promotion.combo_discount,
+      discount_total: promotion.discount_total,
+      applied_combos: promotion.applied_combos,
       shipping_cost: shippingCost,
       tax: roundMoney(tax),
       total: roundMoney(total),

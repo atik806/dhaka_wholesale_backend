@@ -20,13 +20,18 @@ export class CategoriesService {
   async findAll() {
     const { data, error } = await this.supabase
       .from('categories')
-      .select('*')
+      .select('*, products(count)')
       .order('name');
 
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
 
-    return data || [];
+    // Stored counters can drift after imports or category changes. Count the
+    // current direct product relation; the frontend aggregates descendants.
+    return (data || []).map(({ products, ...category }) => ({
+      ...category,
+      product_count: (products as { count: number }[] | null)?.[0]?.count ?? 0,
+    }));
   }
 
   async findTree() {

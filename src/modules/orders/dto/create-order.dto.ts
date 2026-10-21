@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CouponCodeSchema } from '../../offers/promotions-pricing.js';
 
 const ShippingAddressSchema = z.object({
   firstName: z.string().min(1).max(100),
@@ -20,6 +21,8 @@ export const PAYMENT_METHODS = ['cod', 'bkash', 'nagad', 'card'] as const;
 export const MAX_CHECKOUT_ITEMS = 50;
 
 export const CreateOrderSchema = z.object({
+  expected_total: z.number().min(0).max(100_000_000_000).optional(),
+  coupon_code: CouponCodeSchema,
   shipping_address: ShippingAddressSchema,
   payment_method: z.enum(PAYMENT_METHODS),
   delivery_zone: z
@@ -38,6 +41,8 @@ const CheckoutItemSchema = z.object({
 });
 
 export const CheckoutOrderSchema = z.object({
+  expected_total: z.number().min(0).max(100_000_000_000).optional(),
+  coupon_code: CouponCodeSchema,
   shipping_address: ShippingAddressSchema,
   payment_method: z.enum(PAYMENT_METHODS),
   delivery_zone: z

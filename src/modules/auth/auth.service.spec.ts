@@ -18,7 +18,10 @@ describe('AuthService admin password management', () => {
   const updateUserById = jest.fn();
   const signOut = jest.fn();
   const upsert = jest.fn();
-  const from = jest.fn(() => ({ upsert }));
+  const single = jest.fn();
+  const eq = jest.fn(() => ({ single }));
+  const select = jest.fn(() => ({ eq }));
+  const from = jest.fn(() => ({ upsert, select }));
 
   let service: AuthService;
 
@@ -71,6 +74,87 @@ describe('AuthService admin password management', () => {
       { onConflict: 'id' },
     );
     expect(result.user.role).toBe('admin');
+  });
+
+  it('logs in a verified admin-role account after password recovery', async () => {
+    signInWithPassword.mockResolvedValue({
+      data: {
+        user: { id: 'role-admin-id', email: 'manager@example.com' },
+        session: {
+          access_token: 'access',
+          refresh_token: 'refresh',
+          expires_at: 123,
+        },
+      },
+      error: null,
+    });
+    single.mockResolvedValue({
+      data: {
+        name: 'Store Manager',
+        role: 'admin',
+        phone: null,
+        avatar_url: null,
+        shipping_address: null,
+      },
+      error: null,
+    });
+
+    const result = await service.adminLogin({
+      email: 'manager@example.com',
+      password: 'Recovered2!',
+    });
+
+    expect(signInWithPassword).toHaveBeenCalledWith({
+      email: 'manager@example.com',
+      password: 'Recovered2!',
+    });
+    expect(select).toHaveBeenCalledWith(
+      'name, role, phone, avatar_url, shipping_address',
+    );
+    expect(eq).toHaveBeenCalledWith('id', 'role-admin-id');
+    expect(result.user).toEqual(
+      expect.objectContaining({
+        id: 'role-admin-id',
+        email: 'manager@example.com',
+        name: 'Store Manager',
+        role: 'admin',
+      }),
+    );
+  });
+
+  it('rejects a valid non-admin account and revokes its new session', async () => {
+    signInWithPassword.mockResolvedValue({
+      data: {
+        user: { id: 'customer-id', email: 'customer@example.com' },
+        session: {
+          access_token: 'customer-access',
+          refresh_token: 'customer-refresh',
+          expires_at: 123,
+        },
+      },
+      error: null,
+    });
+    single.mockResolvedValue({
+      data: {
+        name: 'Customer',
+        role: 'customer',
+        phone: null,
+        avatar_url: null,
+        shipping_address: null,
+      },
+      error: null,
+    });
+    signOut.mockResolvedValue({ error: null });
+
+    await expect(
+      service.adminLogin({
+        email: 'customer@example.com',
+        password: 'Customer2!',
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    expect(signOut).toHaveBeenCalledWith('customer-access');
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   it('does not bootstrap an account from an arbitrary failed password', async () => {

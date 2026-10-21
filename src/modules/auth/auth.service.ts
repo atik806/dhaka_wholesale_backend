@@ -7,6 +7,7 @@ import {
   NotFoundException,
   Logger,
 } from '@nestjs/common';
+import type { Session, User } from '@supabase/supabase-js';
 import type { RegisterDto } from './dto/register.dto.js';
 import type { LoginDto } from './dto/login.dto.js';
 import type { UpdateProfileDto } from './dto/update-profile.dto.js';
@@ -223,36 +224,29 @@ export class AuthService {
   async adminLogin(dto: LoginDto) {
     const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
     const bootstrapPassword = process.env.ADMIN_PASSWORD;
+    const email = dto.email.trim().toLowerCase();
 
     // Use a temporary anon client for sign-in so we never pollute the shared
     // service-role client's auth state.
     const signInClient = createSupabaseAuthClient();
 
-    // ADMIN_EMAIL is the allowlist. ADMIN_PASSWORD is only a bootstrap secret
-    // for creating the account when it does not exist yet; after that,
-    // Supabase is the password source of truth so admins can rotate/recover it.
-    if (!adminEmail || !bootstrapPassword) {
-      this.logger.error(
-        'ADMIN_EMAIL / ADMIN_PASSWORD are not set — admin login disabled',
-      );
-      throw new UnauthorizedException('Admin login is not configured');
-    }
-
-    if (dto.email.trim().toLowerCase() !== adminEmail) {
-      throw new UnauthorizedException('Invalid admin credentials');
-    }
-
-    let sessionResult: { user: any; session: any } | null = null;
+    let sessionResult: { user: User | null; session: Session | null } | null =
+      null;
     const { data: signInData, error: signInError } =
       await signInClient.auth.signInWithPassword({
-        email: adminEmail,
+        email,
         password: dto.password,
       });
 
     // A failed login may mean either a missing account or a wrong password.
     // Only the deployment bootstrap password may create the privileged user.
     if (signInError) {
-      if (dto.password !== bootstrapPassword) {
+      if (
+        !adminEmail ||
+        email !== adminEmail ||
+        !bootstrapPassword ||
+        dto.password !== bootstrapPassword
+      ) {
         throw new UnauthorizedException('Invalid admin credentials');
       }
 
@@ -283,20 +277,48 @@ export class AuthService {
       throw new UnauthorizedException('Admin login failed');
     }
 
-    // The configured email remains the authorization boundary. Keeping its
-    // role synchronized lets the regular AuthGuard/RolesGuard protect all
-    // subsequent admin requests, including after password recovery.
-    await this.ensureAdminProfile(sessionResult.user.id, adminEmail);
+    let profile: {
+      name: string;
+      role: string;
+      phone: string | null;
+      avatar_url: string | null;
+      shipping_address: Record<string, string> | null;
+    } = {
+      name: 'Admin',
+      role: 'admin',
+      phone: null,
+      avatar_url: null,
+      shipping_address: null,
+    };
+
+    if (email === adminEmail) {
+      // Keep the configured bootstrap account compatible with existing setup.
+      await this.ensureAdminProfile(sessionResult.user.id, email);
+    } else {
+      const { data, error } = await this.supabaseAdmin
+        .from('profiles')
+        .select('name, role, phone, avatar_url, shipping_address')
+        .eq('id', sessionResult.user.id)
+        .single();
+
+      if (error || !data || data.role !== 'admin') {
+        // Authentication can succeed for a customer. Revoke that new session
+        // before denying admin access; never promote an arbitrary account.
+        await this.logout(sessionResult.session.access_token);
+        throw new UnauthorizedException('Invalid admin credentials');
+      }
+      profile = data;
+    }
 
     return {
       user: {
         id: sessionResult.user.id,
-        email: adminEmail,
-        name: 'Admin',
+        email,
+        name: profile.name,
         role: 'admin' as const,
-        phone: null,
-        avatar_url: null,
-        shipping_address: null,
+        phone: profile.phone,
+        avatar_url: profile.avatar_url,
+        shipping_address: profile.shipping_address,
       },
       session: {
         access_token: sessionResult.session.access_token,

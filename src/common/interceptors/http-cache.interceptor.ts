@@ -21,6 +21,19 @@ export class HttpCacheInterceptor {
   ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    // Price-bearing responses must reflect sale boundaries and edits immediately.
+    const priceRequest = context.switchToHttp().getRequest();
+    if (
+      /^\/(?:api\/)?(?:products|offers|cart|checkout|wishlist)(?:\/|\?|$)/.test(
+        String(priceRequest.url),
+      )
+    ) {
+      context
+        .switchToHttp()
+        .getResponse<Response>()
+        .setHeader('Cache-Control', 'no-store');
+      return next.handle();
+    }
     const ttl = this.reflector.get<number>(CACHE_TTL_KEY, context.getHandler());
     if (ttl === undefined) {
       return next.handle();

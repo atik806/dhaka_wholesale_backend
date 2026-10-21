@@ -451,6 +451,128 @@ export class AdminService {
     return { message: 'User deleted successfully' };
   }
 
+  async findAllStaff(query: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    status?: 'active' | 'inactive' | 'on_leave';
+    department?: string;
+  }) {
+    const page = query.page || 1;
+    const limit = query.limit || 20;
+    const offset = (page - 1) * limit;
+
+    let sb = this.supabase
+      .from('staff_members')
+      .select('*', { count: 'exact' });
+
+    if (query.search) {
+      const sanitized = query.search.replace(/[(),.]/g, '').slice(0, 200);
+      sb = sb.or(
+        `name.ilike.%${sanitized}%,email.ilike.%${sanitized}%,job_title.ilike.%${sanitized}%,department.ilike.%${sanitized}%`,
+      );
+    }
+    if (query.status) sb = sb.eq('status', query.status);
+    if (query.department) sb = sb.eq('department', query.department);
+
+    const { data, error, count } = await sb
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (error) {
+      this.logger.error(`Failed to list staff: ${error.message}`);
+      throw new InternalServerErrorException('Failed to load staff');
+    }
+
+    return {
+      data: data || [],
+      meta: {
+        total: count || 0,
+        page,
+        limit,
+        totalPages: Math.ceil((count || 0) / limit),
+      },
+    };
+  }
+
+  async createStaff(dto: {
+    name: string;
+    email: string;
+    phone?: string | null;
+    job_title: string;
+    department: string;
+    status: 'active' | 'inactive' | 'on_leave';
+    avatar_url?: string | null;
+    joined_at: string;
+  }) {
+    const { data, error } = await this.supabase
+      .from('staff_members')
+      .insert(dto)
+      .select()
+      .single();
+
+    if (error?.code === '23505') {
+      throw new BadRequestException(
+        'A staff member with this email already exists',
+      );
+    }
+    if (error) {
+      this.logger.error(`Failed to create staff member: ${error.message}`);
+      throw new InternalServerErrorException('Failed to create staff member');
+    }
+    return data;
+  }
+
+  async updateStaff(
+    id: string,
+    updates: Partial<{
+      name: string;
+      email: string;
+      phone: string | null;
+      job_title: string;
+      department: string;
+      status: 'active' | 'inactive' | 'on_leave';
+      avatar_url: string | null;
+      joined_at: string;
+    }>,
+  ) {
+    const { data, error } = await this.supabase
+      .from('staff_members')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error?.code === '23505') {
+      throw new BadRequestException(
+        'A staff member with this email already exists',
+      );
+    }
+    if (error?.code === 'PGRST116') {
+      throw new NotFoundException('Staff member not found');
+    }
+    if (error) {
+      this.logger.error(`Failed to update staff member: ${error.message}`);
+      throw new InternalServerErrorException('Failed to update staff member');
+    }
+    if (!data) throw new NotFoundException('Staff member not found');
+    return data;
+  }
+
+  async deleteStaff(id: string) {
+    const { error, count } = await this.supabase
+      .from('staff_members')
+      .delete({ count: 'exact' })
+      .eq('id', id);
+
+    if (error) {
+      this.logger.error(`Failed to delete staff member: ${error.message}`);
+      throw new InternalServerErrorException('Failed to delete staff member');
+    }
+    if (count === 0) throw new NotFoundException('Staff member not found');
+    return { message: 'Staff member deleted successfully' };
+  }
+
   async findAllReviews(query: { page?: number; limit?: number }) {
     const page = query.page || 1;
     const limit = query.limit || 10;

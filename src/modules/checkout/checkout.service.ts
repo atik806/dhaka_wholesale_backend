@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import type { CheckoutQuoteDto } from './dto/checkout-quote.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import { OffersService } from '../offers/offers.service.js';
+import { PromotionsService } from '../offers/promotions.service.js';
 import {
   availableStock,
   calculateShippingCost,
@@ -15,6 +17,10 @@ import {
 @Injectable()
 export class CheckoutService {
   private supabase = createSupabaseAdminClient();
+  constructor(
+    private readonly offers: OffersService,
+    private readonly promotions: PromotionsService,
+  ) {}
 
   /**
    * Server-side pricing source of truth for checkout.
@@ -22,9 +28,8 @@ export class CheckoutService {
    */
   async quote(userId: string, dto: CheckoutQuoteDto) {
     const lines = await this.resolveLines(userId, dto.items);
-    const subtotal = roundMoney(
-      lines.reduce((sum, line) => sum + line.price * line.quantity, 0),
-    );
+    const promotion = await this.promotions.apply(lines, dto.coupon_code);
+    const subtotal = promotion.subtotal;
     const shippingCost = calculateShippingCost(dto.delivery_zone);
     const tax = calculateTax(subtotal);
     const total = roundMoney(subtotal + shippingCost + tax);
@@ -38,7 +43,16 @@ export class CheckoutService {
       tax,
       total,
       currency: 'BDT',
-      items: lines,
+      original_subtotal: promotion.original_subtotal,
+      discount_total: promotion.discount_total,
+      combo_discount: promotion.combo_discount,
+      coupon_discount: promotion.coupon_discount,
+      applied_combos: promotion.applied_combos,
+      coupon_code: promotion.coupon_code,
+      items: lines.map((line, index) => ({
+        ...line,
+        line_total: promotion.line_totals[index],
+      })),
       can_checkout: unavailable.length === 0,
       unavailable_items: unavailable.map((l) => ({
         product_id: l.product_id,
@@ -74,6 +88,7 @@ export class CheckoutService {
       throw new BadRequestException('Cart is empty');
     }
 
+    const prices = await this.offers.prices();
     return cartItems.map((item) => {
       const product = item.products as unknown as {
         id: string;
@@ -82,6 +97,11 @@ export class CheckoutService {
         stock_quantity: number | null;
         stock: string;
       } | null;
+      if (product)
+        product.price = Math.min(
+          product.price,
+          prices.get(product.id) ?? product.price,
+        );
       const stockQty = availableStock(product?.stock_quantity, product?.stock);
       const qty = item.quantity;
       return {
@@ -112,7 +132,8 @@ export class CheckoutService {
       throw new BadRequestException('One or more products are invalid');
     }
 
-    const productMap = new Map(products.map((p) => [p.id, p]));
+    const pricedProducts = await this.offers.priceProducts(products);
+    const productMap = new Map(pricedProducts.map((p) => [p.id, p]));
     const missing = productIds.filter((id) => !productMap.has(id));
     if (missing.length > 0) {
       throw new BadRequestException('One or more products are invalid');
