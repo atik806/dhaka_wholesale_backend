@@ -246,29 +246,29 @@ export class ProductsService {
   }
 
   async getStockStats() {
-    // Aggregate per stock status with a GROUP BY (returns at most 3 rows).
-    const query = this.supabase.from('products').select('stock, count(*)');
-    const { data, error } = (await query) as unknown as {
-      data: { stock: string; count: string | number }[] | null;
-      error: { message: string } | null;
-    };
+    // PostgREST rejects aggregates such as `count(*)` unless they are enabled
+    // on the server (PGRST123), so count each status with a head request.
+    const statuses = ['in-stock', 'low-stock', 'out-of-stock'] as const;
+    const results = await Promise.all(
+      statuses.map((stock) =>
+        this.supabase
+          .from('products')
+          .select('id', { count: 'exact', head: true })
+          .eq('stock', stock),
+      ),
+    );
 
-    if (error)
+    if (results.some((result) => result.error))
       throw new InternalServerErrorException('An internal error occurred');
 
-    const counts = new Map<string, number>();
-    for (const row of data ?? []) {
-      const n = Number(row.count) || 0;
-      counts.set(row.stock, (counts.get(row.stock) ?? 0) + n);
-    }
+    const [inStock, lowStock, outOfStock] = results.map(
+      (result) => result.count ?? 0,
+    );
 
     return {
-      total:
-        (counts.get('in-stock') ?? 0) +
-        (counts.get('low-stock') ?? 0) +
-        (counts.get('out-of-stock') ?? 0),
-      lowStock: counts.get('low-stock') ?? 0,
-      outOfStock: counts.get('out-of-stock') ?? 0,
+      total: inStock + lowStock + outOfStock,
+      lowStock,
+      outOfStock,
     };
   }
 
