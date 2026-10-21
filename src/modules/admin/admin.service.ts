@@ -185,7 +185,9 @@ export class AdminService {
 
     let sb = this.supabase
       .from('orders')
-      .select('*, profiles!orders_user_id_fkey(name, email)', { count: 'exact' });
+      .select('*, profiles!orders_user_id_fkey(name, email)', {
+        count: 'exact',
+      });
 
     if (query.status) {
       sb = sb.eq('status', query.status);
