@@ -32,6 +32,8 @@ describe('Combo and coupon persistence', () => {
     ends_at: combo.ends_at,
     minimum_spend: 0,
     maximum_discount: null,
+    max_redemptions: null,
+    per_customer_limit: null,
   };
   let rows: Map<string, unknown>;
   let service: PromotionsService;

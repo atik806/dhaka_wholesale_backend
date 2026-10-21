@@ -70,7 +70,7 @@ describe('OrdersService order placement', () => {
   beforeEach(() => {
     cartClearError = null;
     combos = [];
-    rpc = jest.fn(() =>
+    rpc = jest.fn<Promise<RpcResult>, [string, Record<string, unknown>]>(() =>
       Promise.resolve<RpcResult>({
         data: { order_id: 'order-1', replayed: false },
         error: null,

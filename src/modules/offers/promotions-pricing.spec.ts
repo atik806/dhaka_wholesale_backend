@@ -35,6 +35,8 @@ const coupon: Coupon = {
   value: 10,
   minimum_spend: 0,
   maximum_discount: null,
+  max_redemptions: null,
+  per_customer_limit: null,
 };
 const lines = [
   { product_id: a, price: 100, quantity: 1 },

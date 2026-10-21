@@ -29,6 +29,7 @@ describe('One server price across cart, quote, and order creation', () => {
     firstName: 'Test',
     lastName: 'Customer',
     email: 'test@example.com',
+    phone: '01712345678',
     address: 'Test address',
     city: 'Dhaka',
     zipCode: '1200',
@@ -202,6 +203,8 @@ describe('One server price across cart, quote, and order creation', () => {
       value: 10,
       minimum_spend: 100,
       maximum_discount: null,
+      max_redemptions: null,
+      per_customer_limit: null,
     };
     const items = [
       { product_id: id, quantity: 1 },
@@ -242,9 +245,9 @@ describe('One server price across cart, quote, and order creation', () => {
   ])(
     '%s uses the same authoritative price everywhere',
     async (_label, now, enabled, expectedPrice) => {
-      jest.spyOn(Date, 'now').mockReturnValue(now as number);
-      sale.enabled = enabled as boolean;
-      const price = expectedPrice as number;
+      jest.spyOn(Date, 'now').mockReturnValue(now);
+      sale.enabled = enabled;
+      const price = expectedPrice;
       const items = [{ product_id: id, quantity: 2 }];
       const cartRows = await cart.findByUser('customer');
       expect((cartRows[0].products as unknown as { price: number }).price).toBe(
