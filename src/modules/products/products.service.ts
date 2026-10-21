@@ -340,9 +340,20 @@ export class ProductsService {
       updatedData.stock_quantity = dto.stock_quantity;
       updatedData.stock = deriveStockStatus(dto.stock_quantity);
     } else if (dto.stock !== undefined) {
-      // Legacy enum-only updates still sync a sensible quantity
-      updatedData.stock_quantity = resolveStockQuantity(undefined, dto.stock);
-      updatedData.stock = dto.stock;
+      // Legacy label-only update (older admin form). Resending the label the
+      // product already has must not touch the real count; only an actual
+      // label change falls back to a nominal quantity for that level.
+      const { data: current } = await this.supabase
+        .from('products')
+        .select('stock_quantity')
+        .eq('id', id)
+        .single();
+      const currentQty = Math.max(0, Math.floor(current?.stock_quantity ?? 0));
+      delete updatedData.stock;
+      if (deriveStockStatus(currentQty) !== dto.stock) {
+        updatedData.stock_quantity = resolveStockQuantity(undefined, dto.stock);
+        updatedData.stock = dto.stock;
+      }
     }
 
     const { data, error } = await this.supabase
