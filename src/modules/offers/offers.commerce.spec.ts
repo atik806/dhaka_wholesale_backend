@@ -61,6 +61,21 @@ describe('One server price across cart, quote, and order creation', () => {
       products: [{ product_id: id, price: 80 }],
     };
     jest.mocked(createSupabaseAdminClient).mockReturnValue({
+      // place_order() inserts the order and its items in one transaction.
+      rpc: (
+        _name: string,
+        args: {
+          p_order: Record<string, unknown>;
+          p_items: { price: number }[];
+        },
+      ) => {
+        savedOrder = args.p_order;
+        savedItems = args.p_items;
+        return Promise.resolve({
+          data: { order_id: 'order', replayed: false },
+          error: null,
+        });
+      },
       from: (table: string) => {
         if (table === 'site_settings')
           return {

@@ -20,7 +20,16 @@ export const PAYMENT_METHODS = ['cod', 'bkash', 'nagad', 'card'] as const;
 // memory/query time with a 10,000-item cart.
 export const MAX_CHECKOUT_ITEMS = 50;
 
+// One key per checkout attempt, reused by the client on retry so a timeout
+// or double submit returns the original order instead of placing another.
+// Optional until every client sends it.
+const IdempotencyKeySchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{16,100}$/)
+  .optional();
+
 export const CreateOrderSchema = z.object({
+  idempotency_key: IdempotencyKeySchema,
   expected_total: z.number().min(0).max(100_000_000_000).optional(),
   coupon_code: CouponCodeSchema,
   shipping_address: ShippingAddressSchema,
@@ -41,6 +50,7 @@ const CheckoutItemSchema = z.object({
 });
 
 export const CheckoutOrderSchema = z.object({
+  idempotency_key: IdempotencyKeySchema,
   expected_total: z.number().min(0).max(100_000_000_000).optional(),
   coupon_code: CouponCodeSchema,
   shipping_address: ShippingAddressSchema,
