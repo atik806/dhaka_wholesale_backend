@@ -11,6 +11,20 @@ import { CacheStore } from '../cache/cache-store.js';
 
 export const CACHE_TTL_KEY = 'cache_ttl';
 
+/**
+ * Public, non-user endpoints the storefront polls (flash sale, combos, promo
+ * banner). Letting the Vercel CDN hold them for 15s means one function run
+ * per 15s in total instead of one per open tab per poll. Prices are still
+ * re-computed server-side by cart quote and place_order, so a 15s-stale
+ * banner can't change what a customer pays.
+ */
+export const PUBLIC_POLL_CACHE_CONTROL =
+  'public, max-age=0, s-maxage=15, stale-while-revalidate=45';
+
+// GET /offers and GET /offers/combos carry PUBLIC_POLL_CACHE_CONTROL; every
+// other price-bearing route below stays no-store.
+const PUBLIC_POLL_ROUTE = /^\/(?:api\/)?offers(?:\/combos)?(?:\?|$)/;
+
 @Injectable()
 export class HttpCacheInterceptor {
   private readonly logger = new Logger(HttpCacheInterceptor.name);
@@ -23,6 +37,12 @@ export class HttpCacheInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     // Price-bearing responses must reflect sale boundaries and edits immediately.
     const priceRequest = context.switchToHttp().getRequest();
+    if (
+      priceRequest.method === 'GET' &&
+      PUBLIC_POLL_ROUTE.test(String(priceRequest.url))
+    ) {
+      return next.handle();
+    }
     if (
       /^\/(?:api\/)?(?:products|offers|cart|checkout|wishlist)(?:\/|\?|$)/.test(
         String(priceRequest.url),

@@ -8,6 +8,7 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
+import { PUBLIC_POLL_CACHE_CONTROL } from '../../common/interceptors/http-cache.interceptor.js';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
@@ -20,7 +21,7 @@ export class OffersController {
   constructor(private readonly offers: OffersService) {}
 
   @Get()
-  @Header('Cache-Control', 'no-store')
+  @Header('Cache-Control', PUBLIC_POLL_CACHE_CONTROL)
   get() {
     return this.offers.get();
   }
