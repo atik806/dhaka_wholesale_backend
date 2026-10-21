@@ -65,3 +65,51 @@ describe('product stock updates', () => {
     );
   });
 });
+
+describe('product stock stats', () => {
+  function serviceWith(
+    counts: Record<string, number>,
+    error: { message: string } | null = null,
+  ) {
+    const selects: [string, unknown][] = [];
+    jest.mocked(createSupabaseAdminClient).mockReturnValue({
+      from: () => ({
+        select: (columns: string, options: unknown) => {
+          selects.push([columns, options]);
+          return {
+            eq: (_column: string, stock: string) =>
+              Promise.resolve({ count: counts[stock] ?? 0, error }),
+          };
+        },
+      }),
+    } as never);
+    const service = new ProductsService(
+      {} as CategoriesService,
+      { deleteByPrefix: jest.fn() } as unknown as CacheStore,
+      {} as OffersService,
+    );
+    return { service, selects };
+  }
+
+  it('counts each status without aggregate functions', async () => {
+    const { service, selects } = serviceWith({
+      'in-stock': 26,
+      'low-stock': 6,
+      'out-of-stock': 1,
+    });
+    await expect(service.getStockStats()).resolves.toEqual({
+      total: 33,
+      lowStock: 6,
+      outOfStock: 1,
+    });
+    for (const [columns, options] of selects) {
+      expect(columns).not.toMatch(/count\(/);
+      expect(options).toEqual({ count: 'exact', head: true });
+    }
+  });
+
+  it('fails loudly instead of reporting zeros', async () => {
+    const { service } = serviceWith({}, { message: 'boom' });
+    await expect(service.getStockStats()).rejects.toThrow();
+  });
+});
