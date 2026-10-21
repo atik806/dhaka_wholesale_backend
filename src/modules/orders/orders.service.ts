@@ -20,6 +20,7 @@ import {
   calculateTax,
   roundMoney,
 } from '../../common/utils/commerce.js';
+import { canTransitionOrder } from './order-state.js';
 
 type PromotionResult = Awaited<ReturnType<PromotionsService['apply']>>;
 
@@ -328,19 +329,27 @@ export class OrdersService {
       .single();
 
     if (findError || !order) throw new NotFoundException('Order not found');
-    if (order.status !== 'pending')
+    if (!canTransitionOrder(order.status, 'cancelled', 'customer'))
       throw new BadRequestException('Only pending orders can be cancelled');
 
-    // Restock is handled by DB trigger restock_on_cancel
+    // Conditional on still being pending: if an admin confirmed or shipped
+    // the order since it was read, no row matches and nothing is cancelled.
+    // Restock is handled by the DB trigger restock_on_cancel.
     const { data, error } = await this.supabase
       .from('orders')
       .update({ status: 'cancelled' })
       .eq('id', orderId)
+      .eq('user_id', userId)
+      .eq('status', 'pending')
       .select()
-      .single();
+      .maybeSingle();
 
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
+    if (!data)
+      throw new ConflictException(
+        'This order is already being processed and can no longer be cancelled.',
+      );
     return data;
   }
 

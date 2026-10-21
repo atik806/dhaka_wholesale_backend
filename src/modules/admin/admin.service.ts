@@ -2,10 +2,22 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import {
+  ORDER_STATUSES,
+  PAYMENT_STATUSES,
+  canTransitionOrder,
+  canTransitionPayment,
+  type OrderStatus,
+  type PaymentStatus,
+} from '../orders/order-state.js';
+
+const STALE_ORDER_MESSAGE =
+  'This order was changed by someone else. Reload it and try again.';
 
 @Injectable()
 export class AdminService {
@@ -228,45 +240,46 @@ export class AdminService {
   }
 
   async updateOrderStatus(orderId: string, status: string) {
-    const validStatuses = [
-      'pending',
-      'confirmed',
-      'shipped',
-      'delivered',
-      'cancelled',
-    ];
-    if (!validStatuses.includes(status)) {
+    if (!ORDER_STATUSES.includes(status as OrderStatus)) {
       throw new BadRequestException('Invalid order status');
     }
 
     const { data: current, error: findError } = await this.supabase
       .from('orders')
-      .select('id, status')
+      .select('*')
       .eq('id', orderId)
       .single();
 
     if (findError || !current) throw new NotFoundException('Order not found');
+    if (current.status === status) return current;
 
-    // Reactivating a cancelled order would let stock inflate: the restock
-    // trigger already returned its units, and moving back to a non-cancelled
-    // status does NOT re-decrement. Toggling cancelled -> active -> cancelled
-    // then credits the same units again. Block the transition instead.
-    if (current.status === 'cancelled' && status !== 'cancelled') {
+    // Fulfilment only moves forward, and only pending/confirmed orders can be
+    // cancelled (their goods are still here, so the restock trigger is
+    // correct). A cancelled order is never reactivated: its units were
+    // already credited back. The DB trigger enforces the same rules.
+    if (!canTransitionOrder(current.status, status as OrderStatus, 'admin')) {
       throw new BadRequestException(
-        'A cancelled order cannot be reactivated. Create a new order instead.',
+        `An order cannot move from ${current.status} to ${status}.`,
       );
     }
 
+    // Conditional on the status read above, so a concurrent change (e.g. the
+    // customer cancelling) is reported instead of silently overwritten.
     const { data, error } = await this.supabase
       .from('orders')
       .update({ status })
       .eq('id', orderId)
+      .eq('status', current.status)
       .select()
-      .single();
+      .maybeSingle();
 
-    if (error)
+    if (error) {
+      this.logger.error(
+        `Order ${orderId} status update failed: ${error.message}`,
+      );
       throw new InternalServerErrorException('An internal error occurred');
-    if (!data) throw new NotFoundException('Order not found');
+    }
+    if (!data) throw new ConflictException(STALE_ORDER_MESSAGE);
     return data;
   }
 
@@ -311,22 +324,61 @@ export class AdminService {
     return { message: 'Order deleted successfully' };
   }
 
-  async updatePaymentStatus(orderId: string, paymentStatus: string) {
-    const validStatuses = ['pending', 'paid', 'failed', 'refunded'];
-    if (!validStatuses.includes(paymentStatus)) {
+  async updatePaymentStatus(
+    orderId: string,
+    paymentStatus: string,
+    actorId: string,
+  ) {
+    if (!PAYMENT_STATUSES.includes(paymentStatus as PaymentStatus)) {
       throw new BadRequestException('Invalid payment status');
+    }
+
+    const { data: current, error: findError } = await this.supabase
+      .from('orders')
+      .select('*')
+      .eq('id', orderId)
+      .single();
+
+    if (findError || !current) throw new NotFoundException('Order not found');
+    if (current.payment_status === paymentStatus) return current;
+
+    if (
+      !canTransitionPayment(
+        current.payment_status,
+        paymentStatus as PaymentStatus,
+        current.status,
+      )
+    ) {
+      throw new BadRequestException(
+        paymentStatus === 'paid'
+          ? 'Cash can only be marked collected once the order has shipped or been delivered.'
+          : `Payment cannot move from ${current.payment_status} to ${paymentStatus}.`,
+      );
+    }
+
+    // For cash on delivery, "paid" means cash collected: record who and when.
+    const update: Record<string, unknown> = { payment_status: paymentStatus };
+    if (paymentStatus === 'paid') {
+      update.paid_at = new Date().toISOString();
+      update.paid_by = actorId;
     }
 
     const { data, error } = await this.supabase
       .from('orders')
-      .update({ payment_status: paymentStatus })
+      .update(update)
       .eq('id', orderId)
+      .eq('payment_status', current.payment_status)
+      .eq('status', current.status)
       .select()
-      .single();
+      .maybeSingle();
 
-    if (error)
+    if (error) {
+      this.logger.error(
+        `Order ${orderId} payment update failed: ${error.message}`,
+      );
       throw new InternalServerErrorException('An internal error occurred');
-    if (!data) throw new NotFoundException('Order not found');
+    }
+    if (!data) throw new ConflictException(STALE_ORDER_MESSAGE);
     return data;
   }
 

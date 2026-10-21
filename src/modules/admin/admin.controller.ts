@@ -17,13 +17,16 @@ import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
 import { UuidParamPipe } from '../../common/pipes/uuid-param.pipe.js';
+import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
+import type { JwtUser } from '../../common/decorators/current-user.decorator.js';
+import { ORDER_STATUSES, PAYMENT_STATUSES } from '../orders/order-state.js';
 
 const UpdateStatusSchema = z.object({
-  status: z.enum(['pending', 'confirmed', 'shipped', 'delivered', 'cancelled']),
+  status: z.enum(ORDER_STATUSES),
 });
 
 const UpdatePaymentStatusSchema = z.object({
-  payment_status: z.enum(['pending', 'paid', 'failed', 'refunded']),
+  payment_status: z.enum(PAYMENT_STATUSES),
 });
 
 const UpdateRoleSchema = z.object({
@@ -186,11 +189,16 @@ export class AdminController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update payment status' })
   async updatePaymentStatus(
+    @CurrentUser() user: JwtUser,
     @Param('id', UuidParamPipe) id: string,
     @Body(new ZodValidationPipe(UpdatePaymentStatusSchema))
     body: { payment_status: string },
   ) {
-    return this.adminService.updatePaymentStatus(id, body.payment_status);
+    return this.adminService.updatePaymentStatus(
+      id,
+      body.payment_status,
+      user.id,
+    );
   }
 
   @Delete('orders/:id')
