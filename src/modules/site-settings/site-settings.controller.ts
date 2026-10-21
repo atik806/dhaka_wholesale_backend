@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Controller,
   Get,
+  Header,
   Put,
   Body,
   Param,
@@ -20,12 +21,14 @@ export class SiteSettingsController {
   constructor(private readonly siteSettingsService: SiteSettingsService) {}
 
   @Get()
+  @Header('Cache-Control', 'no-store')
   @ApiOperation({ summary: 'Get all site settings (public)' })
   async getAll() {
     return this.siteSettingsService.getAll();
   }
 
   @Get(':key')
+  @Header('Cache-Control', 'no-store')
   @ApiOperation({ summary: 'Get a specific site setting (public)' })
   async get(@Param('key') key: string) {
     return this.siteSettingsService.get(key);
@@ -37,7 +40,7 @@ export class SiteSettingsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update site settings (admin only)' })
   async update(@Body() body: Record<string, unknown>, @Request() req: any) {
-    if (!body || typeof body !== 'object') {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
       throw new BadRequestException('Request body must be a JSON object');
     }
     const userId = req.user?.id;
@@ -54,7 +57,7 @@ export class SiteSettingsController {
     @Body() body: { value: Record<string, unknown> },
     @Request() req: any,
   ) {
-    if (!body || typeof body !== 'object') {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
       throw new BadRequestException('Request body must be a JSON object');
     }
     const userId = req.user?.id;

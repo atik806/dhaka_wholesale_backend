@@ -1,25 +1,52 @@
 import { z } from 'zod';
+import { CouponCodeSchema } from '../../offers/promotions-pricing.js';
+
+/**
+ * Bangladeshi mobile number, normalised to the 11-digit local form
+ * (01XXXXXXXXX). Accepts +880 / 880 prefixes, spaces and dashes. Cash on
+ * delivery depends on a confirmation call, so a valid number is required.
+ */
+export const BdMobileSchema = z
+  .string()
+  .transform((value) => {
+    const digits = value.replace(/[\s()-]/g, '').replace(/^\+/, '');
+    return digits.startsWith('880') ? digits.slice(2) : digits;
+  })
+  .refine((value) => /^01[3-9]\d{8}$/.test(value), {
+    message: 'Enter a valid Bangladeshi mobile number, e.g. 01712345678',
+  });
 
 const ShippingAddressSchema = z.object({
-  firstName: z.string().min(1).max(100),
-  lastName: z.string().min(1).max(100),
-  email: z.string().email().max(254),
-  phone: z.string().max(30).optional(),
-  address: z.string().min(1).max(500),
-  city: z.string().min(1).max(100),
-  zipCode: z.string().min(1).max(20),
+  firstName: z.string().trim().min(1).max(100),
+  lastName: z.string().trim().min(1).max(100),
+  email: z.string().trim().email().max(254),
+  phone: BdMobileSchema,
+  address: z.string().trim().min(5).max(500),
+  city: z.string().trim().min(2).max(100),
+  zipCode: z.string().trim().min(1).max(20),
 });
 
-// Only these payment methods are accepted. A free-form string here
-// previously let a client invent a "cod" / "paid" value, which other
-// parts of the code base then trusted.
-export const PAYMENT_METHODS = ['cod', 'bkash', 'nagad', 'card'] as const;
+// Only payment methods the shop can actually settle are accepted. COD is the
+// only one today; add bKash/Nagad/card here only together with a real
+// provider integration (verified callbacks, reconciliation, refunds).
+export const PAYMENT_METHODS = ['cod'] as const;
 
 // Hard ceiling on line items so a single request can't blow up
 // memory/query time with a 10,000-item cart.
 export const MAX_CHECKOUT_ITEMS = 50;
 
+// One key per checkout attempt, reused by the client on retry so a timeout
+// or double submit returns the original order instead of placing another.
+// Optional until every client sends it.
+const IdempotencyKeySchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{16,100}$/)
+  .optional();
+
 export const CreateOrderSchema = z.object({
+  idempotency_key: IdempotencyKeySchema,
+  expected_total: z.number().min(0).max(100_000_000_000).optional(),
+  coupon_code: CouponCodeSchema,
   shipping_address: ShippingAddressSchema,
   payment_method: z.enum(PAYMENT_METHODS),
   delivery_zone: z
@@ -38,6 +65,9 @@ const CheckoutItemSchema = z.object({
 });
 
 export const CheckoutOrderSchema = z.object({
+  idempotency_key: IdempotencyKeySchema,
+  expected_total: z.number().min(0).max(100_000_000_000).optional(),
+  coupon_code: CouponCodeSchema,
   shipping_address: ShippingAddressSchema,
   payment_method: z.enum(PAYMENT_METHODS),
   delivery_zone: z

@@ -17,13 +17,16 @@ import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
 import { UuidParamPipe } from '../../common/pipes/uuid-param.pipe.js';
+import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
+import type { JwtUser } from '../../common/decorators/current-user.decorator.js';
+import { ORDER_STATUSES, PAYMENT_STATUSES } from '../orders/order-state.js';
 
 const UpdateStatusSchema = z.object({
-  status: z.enum(['pending', 'confirmed', 'shipped', 'delivered', 'cancelled']),
+  status: z.enum(ORDER_STATUSES),
 });
 
 const UpdatePaymentStatusSchema = z.object({
-  payment_status: z.enum(['pending', 'paid', 'failed', 'refunded']),
+  payment_status: z.enum(PAYMENT_STATUSES),
 });
 
 const UpdateRoleSchema = z.object({
@@ -53,6 +56,51 @@ const AdminUsersQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(10),
   search: z.string().max(200).default(''),
+});
+
+const StaffStatusSchema = z.enum(['active', 'inactive', 'on_leave']);
+
+const StaffFieldsSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  email: z
+    .string()
+    .trim()
+    .email()
+    .max(254)
+    .transform((value) => value.toLowerCase()),
+  phone: z.string().trim().max(30).nullable().optional(),
+  job_title: z.string().trim().min(1).max(100),
+  department: z.string().trim().min(1).max(100),
+  status: StaffStatusSchema,
+  avatar_url: z
+    .string()
+    .trim()
+    .url()
+    .max(2048)
+    .refine(
+      (value) => /^https?:\/\//i.test(value),
+      'Use an HTTP or HTTPS image URL',
+    )
+    .nullable()
+    .optional(),
+  joined_at: z.iso.date(),
+});
+
+const StaffBodySchema = StaffFieldsSchema.extend({
+  status: StaffStatusSchema.default('active'),
+});
+
+const UpdateStaffSchema = StaffFieldsSchema.partial().refine(
+  (body) => Object.keys(body).length > 0,
+  { message: 'At least one field is required' },
+);
+
+const StaffQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+  search: z.string().trim().max(200).default(''),
+  status: StaffStatusSchema.optional(),
+  department: z.string().trim().max(100).optional(),
 });
 
 const PaginationQuerySchema = z.object({
@@ -141,11 +189,16 @@ export class AdminController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update payment status' })
   async updatePaymentStatus(
+    @CurrentUser() user: JwtUser,
     @Param('id', UuidParamPipe) id: string,
     @Body(new ZodValidationPipe(UpdatePaymentStatusSchema))
     body: { payment_status: string },
   ) {
-    return this.adminService.updatePaymentStatus(id, body.payment_status);
+    return this.adminService.updatePaymentStatus(
+      id,
+      body.payment_status,
+      user.id,
+    );
   }
 
   @Delete('orders/:id')
@@ -196,11 +249,12 @@ export class AdminController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update user role' })
   async updateUserRole(
+    @CurrentUser() user: JwtUser,
     @Param('id', UuidParamPipe) id: string,
     @Body(new ZodValidationPipe(UpdateRoleSchema))
     body: { role: string },
   ) {
-    return this.adminService.updateUserRole(id, body.role);
+    return this.adminService.updateUserRole(id, body.role, user.id);
   }
 
   @Delete('users/:id')
@@ -208,8 +262,81 @@ export class AdminController {
   @Roles('admin')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete user' })
-  async deleteUser(@Param('id', UuidParamPipe) id: string) {
-    return this.adminService.deleteUser(id);
+  async deleteUser(
+    @CurrentUser() user: JwtUser,
+    @Param('id', UuidParamPipe) id: string,
+  ) {
+    return this.adminService.deleteUser(id, user.id);
+  }
+
+  @Get('staff')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get staff directory with filters' })
+  async findAllStaff(
+    @Query(new ZodValidationPipe(StaffQuerySchema))
+    query: {
+      page: number;
+      limit: number;
+      search: string;
+      status?: 'active' | 'inactive' | 'on_leave';
+      department?: string;
+    },
+  ) {
+    return this.adminService.findAllStaff(query);
+  }
+
+  @Post('staff')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Add a staff member' })
+  async createStaff(
+    @Body(new ZodValidationPipe(StaffBodySchema))
+    body: {
+      name: string;
+      email: string;
+      phone?: string | null;
+      job_title: string;
+      department: string;
+      status: 'active' | 'inactive' | 'on_leave';
+      avatar_url?: string | null;
+      joined_at: string;
+    },
+  ) {
+    return this.adminService.createStaff(body);
+  }
+
+  @Patch('staff/:id')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update a staff member' })
+  async updateStaff(
+    @Param('id', UuidParamPipe) id: string,
+    @Body(new ZodValidationPipe(UpdateStaffSchema))
+    body: Partial<{
+      name: string;
+      email: string;
+      phone: string | null;
+      job_title: string;
+      department: string;
+      status: 'active' | 'inactive' | 'on_leave';
+      avatar_url: string | null;
+      joined_at: string;
+    }>,
+  ) {
+    return this.adminService.updateStaff(id, body);
+  }
+
+  @Delete('staff/:id')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Delete a staff member' })
+  async deleteStaff(@Param('id', UuidParamPipe) id: string) {
+    return this.adminService.deleteStaff(id);
   }
 
   @Get('reviews')

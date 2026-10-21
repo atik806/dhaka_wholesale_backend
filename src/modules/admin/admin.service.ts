@@ -2,10 +2,22 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import {
+  ORDER_STATUSES,
+  PAYMENT_STATUSES,
+  canTransitionOrder,
+  canTransitionPayment,
+  type OrderStatus,
+  type PaymentStatus,
+} from '../orders/order-state.js';
+
+const STALE_ORDER_MESSAGE =
+  'This order was changed by someone else. Reload it and try again.';
 
 @Injectable()
 export class AdminService {
@@ -228,45 +240,46 @@ export class AdminService {
   }
 
   async updateOrderStatus(orderId: string, status: string) {
-    const validStatuses = [
-      'pending',
-      'confirmed',
-      'shipped',
-      'delivered',
-      'cancelled',
-    ];
-    if (!validStatuses.includes(status)) {
+    if (!ORDER_STATUSES.includes(status as OrderStatus)) {
       throw new BadRequestException('Invalid order status');
     }
 
     const { data: current, error: findError } = await this.supabase
       .from('orders')
-      .select('id, status')
+      .select('*')
       .eq('id', orderId)
       .single();
 
     if (findError || !current) throw new NotFoundException('Order not found');
+    if (current.status === status) return current;
 
-    // Reactivating a cancelled order would let stock inflate: the restock
-    // trigger already returned its units, and moving back to a non-cancelled
-    // status does NOT re-decrement. Toggling cancelled -> active -> cancelled
-    // then credits the same units again. Block the transition instead.
-    if (current.status === 'cancelled' && status !== 'cancelled') {
+    // Fulfilment only moves forward, and only pending/confirmed orders can be
+    // cancelled (their goods are still here, so the restock trigger is
+    // correct). A cancelled order is never reactivated: its units were
+    // already credited back. The DB trigger enforces the same rules.
+    if (!canTransitionOrder(current.status, status as OrderStatus, 'admin')) {
       throw new BadRequestException(
-        'A cancelled order cannot be reactivated. Create a new order instead.',
+        `An order cannot move from ${current.status} to ${status}.`,
       );
     }
 
+    // Conditional on the status read above, so a concurrent change (e.g. the
+    // customer cancelling) is reported instead of silently overwritten.
     const { data, error } = await this.supabase
       .from('orders')
       .update({ status })
       .eq('id', orderId)
+      .eq('status', current.status)
       .select()
-      .single();
+      .maybeSingle();
 
-    if (error)
+    if (error) {
+      this.logger.error(
+        `Order ${orderId} status update failed: ${error.message}`,
+      );
       throw new InternalServerErrorException('An internal error occurred');
-    if (!data) throw new NotFoundException('Order not found');
+    }
+    if (!data) throw new ConflictException(STALE_ORDER_MESSAGE);
     return data;
   }
 
@@ -311,22 +324,61 @@ export class AdminService {
     return { message: 'Order deleted successfully' };
   }
 
-  async updatePaymentStatus(orderId: string, paymentStatus: string) {
-    const validStatuses = ['pending', 'paid', 'failed', 'refunded'];
-    if (!validStatuses.includes(paymentStatus)) {
+  async updatePaymentStatus(
+    orderId: string,
+    paymentStatus: string,
+    actorId: string,
+  ) {
+    if (!PAYMENT_STATUSES.includes(paymentStatus as PaymentStatus)) {
       throw new BadRequestException('Invalid payment status');
+    }
+
+    const { data: current, error: findError } = await this.supabase
+      .from('orders')
+      .select('*')
+      .eq('id', orderId)
+      .single();
+
+    if (findError || !current) throw new NotFoundException('Order not found');
+    if (current.payment_status === paymentStatus) return current;
+
+    if (
+      !canTransitionPayment(
+        current.payment_status,
+        paymentStatus as PaymentStatus,
+        current.status,
+      )
+    ) {
+      throw new BadRequestException(
+        paymentStatus === 'paid'
+          ? 'Cash can only be marked collected once the order has shipped or been delivered.'
+          : `Payment cannot move from ${current.payment_status} to ${paymentStatus}.`,
+      );
+    }
+
+    // For cash on delivery, "paid" means cash collected: record who and when.
+    const update: Record<string, unknown> = { payment_status: paymentStatus };
+    if (paymentStatus === 'paid') {
+      update.paid_at = new Date().toISOString();
+      update.paid_by = actorId;
     }
 
     const { data, error } = await this.supabase
       .from('orders')
-      .update({ payment_status: paymentStatus })
+      .update(update)
       .eq('id', orderId)
+      .eq('payment_status', current.payment_status)
+      .eq('status', current.status)
       .select()
-      .single();
+      .maybeSingle();
 
-    if (error)
+    if (error) {
+      this.logger.error(
+        `Order ${orderId} payment update failed: ${error.message}`,
+      );
       throw new InternalServerErrorException('An internal error occurred');
-    if (!data) throw new NotFoundException('Order not found');
+    }
+    if (!data) throw new ConflictException(STALE_ORDER_MESSAGE);
     return data;
   }
 
@@ -417,9 +469,43 @@ export class AdminService {
     return profile;
   }
 
-  async updateUserRole(userId: string, role: string) {
+  /** Accounts that can still sign in to the admin panel. */
+  private async countAdmins() {
+    const { count, error } = await this.supabase
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('role', 'admin');
+    if (error)
+      throw new InternalServerErrorException('An internal error occurred');
+    return count ?? 0;
+  }
+
+  private async findProfileRole(userId: string) {
+    const { data } = await this.supabase
+      .from('profiles')
+      .select('id, role')
+      .eq('id', userId)
+      .single();
+    if (!data) throw new NotFoundException('User not found');
+    return data;
+  }
+
+  async updateUserRole(userId: string, role: string, actorId: string) {
     if (!['customer', 'admin'].includes(role)) {
       throw new BadRequestException('Role must be customer or admin');
+    }
+
+    // Never lock everyone out of the admin panel. (Two admins demoting each
+    // other at the same instant could still both succeed; acceptable for
+    // a small team, revisit with an RPC if that changes.)
+    if (role !== 'admin') {
+      if (userId === actorId)
+        throw new BadRequestException(
+          'You cannot remove your own admin access. Ask another admin.',
+        );
+      const target = await this.findProfileRole(userId);
+      if (target.role === 'admin' && (await this.countAdmins()) <= 1)
+        throw new ConflictException('At least one admin must remain.');
     }
 
     const { data, error } = await this.supabase
@@ -435,7 +521,27 @@ export class AdminService {
     return data;
   }
 
-  async deleteUser(userId: string) {
+  async deleteUser(userId: string, actorId: string) {
+    if (userId === actorId)
+      throw new BadRequestException('You cannot delete your own account.');
+
+    const target = await this.findProfileRole(userId);
+    if (target.role === 'admin' && (await this.countAdmins()) <= 1)
+      throw new ConflictException('At least one admin must remain.');
+
+    // orders.user_id cascades on delete (20260802), so deleting a customer
+    // with orders would silently erase their order history.
+    const { count: orderCount, error: orderError } = await this.supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId);
+    if (orderError)
+      throw new InternalServerErrorException('An internal error occurred');
+    if (orderCount)
+      throw new ConflictException(
+        `This account has ${orderCount} order${orderCount === 1 ? '' : 's'}; deleting it would erase that order history. Keep the account instead.`,
+      );
+
     const { error: authError } =
       await this.supabase.auth.admin.deleteUser(userId);
     if (authError) throw new InternalServerErrorException(authError.message);
@@ -449,6 +555,128 @@ export class AdminService {
     }
 
     return { message: 'User deleted successfully' };
+  }
+
+  async findAllStaff(query: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    status?: 'active' | 'inactive' | 'on_leave';
+    department?: string;
+  }) {
+    const page = query.page || 1;
+    const limit = query.limit || 20;
+    const offset = (page - 1) * limit;
+
+    let sb = this.supabase
+      .from('staff_members')
+      .select('*', { count: 'exact' });
+
+    if (query.search) {
+      const sanitized = query.search.replace(/[(),.]/g, '').slice(0, 200);
+      sb = sb.or(
+        `name.ilike.%${sanitized}%,email.ilike.%${sanitized}%,job_title.ilike.%${sanitized}%,department.ilike.%${sanitized}%`,
+      );
+    }
+    if (query.status) sb = sb.eq('status', query.status);
+    if (query.department) sb = sb.eq('department', query.department);
+
+    const { data, error, count } = await sb
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (error) {
+      this.logger.error(`Failed to list staff: ${error.message}`);
+      throw new InternalServerErrorException('Failed to load staff');
+    }
+
+    return {
+      data: data || [],
+      meta: {
+        total: count || 0,
+        page,
+        limit,
+        totalPages: Math.ceil((count || 0) / limit),
+      },
+    };
+  }
+
+  async createStaff(dto: {
+    name: string;
+    email: string;
+    phone?: string | null;
+    job_title: string;
+    department: string;
+    status: 'active' | 'inactive' | 'on_leave';
+    avatar_url?: string | null;
+    joined_at: string;
+  }) {
+    const { data, error } = await this.supabase
+      .from('staff_members')
+      .insert(dto)
+      .select()
+      .single();
+
+    if (error?.code === '23505') {
+      throw new BadRequestException(
+        'A staff member with this email already exists',
+      );
+    }
+    if (error) {
+      this.logger.error(`Failed to create staff member: ${error.message}`);
+      throw new InternalServerErrorException('Failed to create staff member');
+    }
+    return data;
+  }
+
+  async updateStaff(
+    id: string,
+    updates: Partial<{
+      name: string;
+      email: string;
+      phone: string | null;
+      job_title: string;
+      department: string;
+      status: 'active' | 'inactive' | 'on_leave';
+      avatar_url: string | null;
+      joined_at: string;
+    }>,
+  ) {
+    const { data, error } = await this.supabase
+      .from('staff_members')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error?.code === '23505') {
+      throw new BadRequestException(
+        'A staff member with this email already exists',
+      );
+    }
+    if (error?.code === 'PGRST116') {
+      throw new NotFoundException('Staff member not found');
+    }
+    if (error) {
+      this.logger.error(`Failed to update staff member: ${error.message}`);
+      throw new InternalServerErrorException('Failed to update staff member');
+    }
+    if (!data) throw new NotFoundException('Staff member not found');
+    return data;
+  }
+
+  async deleteStaff(id: string) {
+    const { error, count } = await this.supabase
+      .from('staff_members')
+      .delete({ count: 'exact' })
+      .eq('id', id);
+
+    if (error) {
+      this.logger.error(`Failed to delete staff member: ${error.message}`);
+      throw new InternalServerErrorException('Failed to delete staff member');
+    }
+    if (count === 0) throw new NotFoundException('Staff member not found');
+    return { message: 'Staff member deleted successfully' };
   }
 
   async findAllReviews(query: { page?: number; limit?: number }) {

@@ -11,6 +11,8 @@ import type { QueryProductsDto } from './dto/query-products.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
 import { CategoriesService } from '../categories/categories.service.js';
 import { CacheStore } from '../../common/cache/cache-store.js';
+import { OffersService } from '../offers/offers.service.js';
+import { applySalePrice } from '../offers/offer-pricing.js';
 import {
   deriveStockStatus,
   resolveStockQuantity,
@@ -30,6 +32,7 @@ export class ProductsService {
   constructor(
     private readonly categoriesService: CategoriesService,
     private readonly cacheStore: CacheStore,
+    private readonly offers: OffersService,
   ) {}
 
   async findAll(query: QueryProductsDto) {
@@ -70,69 +73,115 @@ export class ProductsService {
       resolvedCategoryIds = [...ids];
     }
 
-    let dbQuery = this.supabase
-      .from('products')
-      .select(PRODUCT_LIST_SELECT, { count: 'exact' });
-
-    if (resolvedCategoryIds && resolvedCategoryIds.length > 0) {
-      dbQuery = dbQuery.in('category_id', resolvedCategoryIds);
-    } else if (
-      slugs.length > 0 &&
-      (!resolvedCategoryIds || resolvedCategoryIds.length === 0)
-    ) {
+    if (slugs.length > 0 && !resolvedCategoryIds?.length) {
       return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
     }
 
-    if (search) {
-      // Only plain words, spaces and hyphens survive. Everything else
-      // is stripped so the user-supplied term can never smuggle an
-      // operator (and, or, NOT, =, etc.) into the PostgREST filter.
-      const sanitized = search
-        .replace(/[^\p{L}\p{N}\s-]/gu, '')
-        .trim()
-        .slice(0, 120);
-      const searchTerm = `%${sanitized}%`;
-      dbQuery = dbQuery.or(
-        `name.ilike.${searchTerm},description.ilike.${searchTerm},tags.cs.{${sanitized}}`,
-      );
+    // Split offered products from regular products so filtering, sorting and
+    // pagination use effective prices without loading the entire catalog.
+    const prices = await this.offers.prices();
+    if (query.onSale && prices.size === 0) {
+      return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
     }
+    const makeQuery = (filterPrice: boolean) => {
+      let dbQuery = this.supabase
+        .from('products')
+        .select(PRODUCT_LIST_SELECT, { count: 'exact' });
+      if (resolvedCategoryIds?.length)
+        dbQuery = dbQuery.in('category_id', resolvedCategoryIds);
+      if (query.onSale) dbQuery = dbQuery.in('id', [...prices.keys()]);
+      if (search) {
+        // Only plain words, spaces and hyphens survive. Everything else
+        // is stripped so the user-supplied term can never smuggle an
+        // operator (and, or, NOT, =, etc.) into the PostgREST filter.
+        const sanitized = search
+          .replace(/[^\p{L}\p{N}\s-]/gu, '')
+          .trim()
+          .slice(0, 120);
+        const searchTerm = `%${sanitized}%`;
+        dbQuery = dbQuery.or(
+          `name.ilike.${searchTerm},description.ilike.${searchTerm},tags.cs.{${sanitized}}`,
+        );
+      }
 
-    if (priceMin !== undefined) dbQuery = dbQuery.gte('price', priceMin);
-    if (priceMax !== undefined) dbQuery = dbQuery.lte('price', priceMax);
-    if (minRating !== undefined) dbQuery = dbQuery.gte('rating', minRating);
+      if (filterPrice && priceMin !== undefined)
+        dbQuery = dbQuery.gte('price', priceMin);
+      if (filterPrice && priceMax !== undefined)
+        dbQuery = dbQuery.lte('price', priceMax);
+      if (minRating !== undefined) dbQuery = dbQuery.gte('rating', minRating);
 
-    if (query.ids && query.ids.length > 0) {
-      dbQuery = dbQuery.in('id', query.ids);
-    }
+      if (query.ids && query.ids.length > 0) {
+        dbQuery = dbQuery.in('id', query.ids);
+      }
 
-    switch (sort) {
-      case 'newest':
-        dbQuery = dbQuery.order('created_at', { ascending: false });
-        break;
-      case 'price-asc':
-        dbQuery = dbQuery.order('price', { ascending: true });
-        break;
-      case 'price-desc':
-        dbQuery = dbQuery.order('price', { ascending: false });
-        break;
-      case 'rating':
-        dbQuery = dbQuery.order('rating', { ascending: false });
-        break;
-      default:
-        dbQuery = dbQuery.order('review_count', { ascending: false });
-        break;
-    }
-
+      return dbQuery;
+    };
+    const sortColumn =
+      sort === 'newest'
+        ? 'created_at'
+        : sort.startsWith('price-')
+          ? 'price'
+          : sort === 'rating'
+            ? 'rating'
+            : 'review_count';
+    const ascending = sort === 'price-asc';
+    const ordered = (dbQuery: ReturnType<typeof makeQuery>) =>
+      dbQuery
+        .order(sortColumn, { ascending, nullsFirst: false })
+        .order('id', { ascending: true });
     const from = (page - 1) * limit;
-    dbQuery = dbQuery.range(from, from + limit - 1);
-
-    const { data, error, count } = await dbQuery;
-
+    if (prices.size > 0) {
+      const ids = [...prices.keys()];
+      const baseStart = Math.max(0, from - ids.length);
+      const [regular, offered] = await Promise.all([
+        ordered(makeQuery(true).not('id', 'in', `(${ids.join(',')})`)).range(
+          baseStart,
+          from + limit - 1,
+        ),
+        makeQuery(false).in('id', ids).range(0, 199),
+      ]);
+      if (regular.error || offered.error)
+        throw new InternalServerErrorException('Failed to load products');
+      const saleProducts = (offered.data ?? [])
+        .map((product) => applySalePrice(product, prices))
+        .filter(
+          (product) => !query.onSale || product.price < product.base_price,
+        )
+        .filter(
+          (product) =>
+            (priceMin === undefined || product.price >= priceMin) &&
+            (priceMax === undefined || product.price <= priceMax),
+        );
+      const merged = [
+        ...(regular.data ?? []).map((product) =>
+          applySalePrice(product, prices),
+        ),
+        ...saleProducts,
+      ];
+      merged.sort((a, b) => {
+        const av = a[sortColumn];
+        const bv = b[sortColumn];
+        if (av == null && bv != null) return 1;
+        if (bv == null && av != null) return -1;
+        const comparison = av! < bv! ? -1 : av! > bv! ? 1 : 0;
+        return (
+          (ascending ? comparison : -comparison) || a.id.localeCompare(b.id)
+        );
+      });
+      const total = (regular.count ?? 0) + saleProducts.length;
+      return {
+        data: merged.slice(from - baseStart, from - baseStart + limit),
+        meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+      };
+    }
+    const { data, error, count } = await ordered(makeQuery(true)).range(
+      from,
+      from + limit - 1,
+    );
     if (error)
-      throw new InternalServerErrorException('An internal error occurred');
-
+      throw new InternalServerErrorException('Failed to load products');
     return {
-      data: data || [],
+      data: (data ?? []).map((product) => applySalePrice(product, prices)),
       meta: {
         total: count || 0,
         page,
@@ -150,7 +199,7 @@ export class ProductsService {
       .single();
 
     if (error || !data) throw new NotFoundException('Product not found');
-    return data;
+    return (await this.offers.priceProducts([data]))[0];
   }
 
   async findByCategory(categorySlug: string, query: QueryProductsDto) {
@@ -167,7 +216,7 @@ export class ProductsService {
 
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
-    return data || [];
+    return this.offers.priceProducts(data || []);
   }
 
   async getRelated(productId: string, categoryId: string, limit = 4) {
@@ -181,7 +230,7 @@ export class ProductsService {
 
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
-    return data || [];
+    return this.offers.priceProducts(data || []);
   }
 
   /** Resolve related products without loading the full product payload. */
@@ -291,9 +340,20 @@ export class ProductsService {
       updatedData.stock_quantity = dto.stock_quantity;
       updatedData.stock = deriveStockStatus(dto.stock_quantity);
     } else if (dto.stock !== undefined) {
-      // Legacy enum-only updates still sync a sensible quantity
-      updatedData.stock_quantity = resolveStockQuantity(undefined, dto.stock);
-      updatedData.stock = dto.stock;
+      // Legacy label-only update (older admin form). Resending the label the
+      // product already has must not touch the real count; only an actual
+      // label change falls back to a nominal quantity for that level.
+      const { data: current } = await this.supabase
+        .from('products')
+        .select('stock_quantity')
+        .eq('id', id)
+        .single();
+      const currentQty = Math.max(0, Math.floor(current?.stock_quantity ?? 0));
+      delete updatedData.stock;
+      if (deriveStockStatus(currentQty) !== dto.stock) {
+        updatedData.stock_quantity = resolveStockQuantity(undefined, dto.stock);
+        updatedData.stock = dto.stock;
+      }
     }
 
     const { data, error } = await this.supabase

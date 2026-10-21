@@ -1,5 +1,22 @@
 -- Dhaka Wholesale E-Commerce Database Schema for Supabase
 -- Run this in your Supabase SQL Editor
+--
+-- 2026-10-21: bug_reports moved below profiles so a from-zero run works (it
+-- references profiles). Content is unchanged; databases that already applied
+-- this migration are unaffected because migrations are tracked by version.
+
+-- Profiles (extends Supabase Auth users)
+CREATE TABLE profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
+  phone TEXT,
+  avatar_url TEXT,
+  shipping_address JSONB,
+  role TEXT DEFAULT 'customer' CHECK (role IN ('customer', 'admin')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
 
 -- Bug Reports
 CREATE TABLE bug_reports (
@@ -32,20 +49,6 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS idx_bug_reports_created_at ON bug_reports(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports(status);
-
-
--- Profiles (extends Supabase Auth users)
-CREATE TABLE profiles (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  email TEXT NOT NULL UNIQUE,
-  phone TEXT,
-  avatar_url TEXT,
-  shipping_address JSONB,
-  role TEXT DEFAULT 'customer' CHECK (role IN ('customer', 'admin')),
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
 
 -- Categories
 CREATE TABLE categories (

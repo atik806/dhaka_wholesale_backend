@@ -19,6 +19,7 @@ import { ReportsModule } from './modules/reports/reports.module.js';
 import { SiteSettingsModule } from './modules/site-settings/site-settings.module.js';
 import { CacheModule } from './common/cache/cache.module.js';
 import { HttpCacheInterceptor } from './common/interceptors/http-cache.interceptor.js';
+import { OffersModule } from './modules/offers/offers.module.js';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { HttpCacheInterceptor } from './common/interceptors/http-cache.intercept
       isGlobal: true,
     }),
     CacheModule,
+    OffersModule,
     ThrottlerModule.forRoot([
       {
         ttl: 60000,

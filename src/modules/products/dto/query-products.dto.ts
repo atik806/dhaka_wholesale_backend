@@ -2,6 +2,10 @@ import { z } from 'zod';
 
 export const QueryProductsSchema = z.object({
   search: z.string().trim().max(120).optional(),
+  onSale: z
+    .enum(['true', 'false'])
+    .transform((value) => value === 'true')
+    .optional(),
   category: z.string().trim().max(100).optional(),
   // Multi-category selection: each entry is a category slug. When present,
   // takes precedence over `category` (a single slug).
@@ -15,7 +19,10 @@ export const QueryProductsSchema = z.object({
     .default('popular'),
   page: z.coerce.number().int().min(1).optional().default(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(12),
-  ids: z.array(z.string().uuid()).max(200).optional(),
+  ids: z.preprocess(
+    (value) => (typeof value === 'string' ? [value] : value),
+    z.array(z.string().uuid()).max(200).optional(),
+  ),
 });
 
 export type QueryProductsDto = z.infer<typeof QueryProductsSchema>;

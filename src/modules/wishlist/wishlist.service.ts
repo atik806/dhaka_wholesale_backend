@@ -1,10 +1,13 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import type { AddWishlistDto, MergeWishlistDto } from './dto/wishlist.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import { OffersService } from '../offers/offers.service.js';
+import { applySalePrice, type PricedProduct } from '../offers/offer-pricing.js';
 
 @Injectable()
 export class WishlistService {
   private supabase = createSupabaseAdminClient();
+  constructor(private readonly offers: OffersService) {}
 
   async findByUser(userId: string) {
     const { data, error } = await this.supabase
@@ -17,7 +20,13 @@ export class WishlistService {
 
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
-    return data || [];
+    const prices = await this.offers.prices();
+    return (data || []).map((item) => ({
+      ...item,
+      products: item.products
+        ? applySalePrice(item.products as unknown as PricedProduct, prices)
+        : null,
+    }));
   }
 
   async addItem(userId: string, dto: AddWishlistDto) {

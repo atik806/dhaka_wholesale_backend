@@ -34,10 +34,11 @@ CORS_ORIGIN=http://localhost:3000,http://localhost:3001
 ```
 
 ### 3. Database Setup
-Run the database schema migration:
+Apply the timestamped migrations in `supabase/migrations/` in filename order:
 ```bash
-supabase db push < supabase-schema.sql
+supabase db push
 ```
+`supabase-schema.sql`, `supabase-migration.sql` and `scripts/apply-pending-db.sql` are legacy snapshots; do not bootstrap from them.
 
 Or run the seed script for initial data:
 ```bash

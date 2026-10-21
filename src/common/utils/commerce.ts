@@ -64,3 +64,43 @@ export function availableStock(
   if (qty > 0) return qty;
   return stockEnum === 'low-stock' ? 3 : 25;
 }
+
+export type VariantOptions = {
+  name?: string | null;
+  sizes?: string[] | null;
+  colors?: Array<{ name?: string | null } | null> | null;
+};
+
+/**
+ * Check a size/colour choice against the product's real options and return
+ * the values to store. A product with sizes (or colours) requires one of
+ * them; a product without options stores no selection, so a stale or
+ * invented value is dropped instead of persisted. Returns an error message
+ * when the choice is not valid.
+ */
+export function resolveVariant(
+  product: VariantOptions,
+  size?: string | null,
+  color?: string | null,
+):
+  | { size: string | null; color: string | null; error?: undefined }
+  | { error: string } {
+  const label = product.name ? `"${product.name}"` : 'this product';
+  const sizes = (product.sizes ?? []).filter(Boolean);
+  const colors = (product.colors ?? [])
+    .map((option) => option?.name)
+    .filter((name): name is string => !!name);
+
+  if (sizes.length > 0 && !size) return { error: `Choose a size for ${label}` };
+  if (sizes.length > 0 && !sizes.includes(size!))
+    return { error: `${size} is not an available size for ${label}` };
+  if (colors.length > 0 && !color)
+    return { error: `Choose a colour for ${label}` };
+  if (colors.length > 0 && !colors.includes(color!))
+    return { error: `${color} is not an available colour for ${label}` };
+
+  return {
+    size: sizes.length > 0 ? size! : null,
+    color: colors.length > 0 ? color! : null,
+  };
+}

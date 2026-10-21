@@ -6,22 +6,60 @@ import {
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import type {
   CreateOrderDto,
   CheckoutOrderDto,
 } from './dto/create-order.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import { OffersService } from '../offers/offers.service.js';
+import { PromotionsService } from '../offers/promotions.service.js';
 import {
   availableStock,
   calculateShippingCost,
   calculateTax,
+  resolveVariant,
   roundMoney,
+  type VariantOptions,
 } from '../../common/utils/commerce.js';
+import { canTransitionOrder } from './order-state.js';
+
+type PromotionResult = Awaited<ReturnType<PromotionsService['apply']>>;
+
+type OrderItemSnapshot = {
+  product_id: string;
+  product_name: string;
+  product_image: string | null;
+  price: number;
+  original_price: number;
+  quantity: number;
+  selected_size: string | null;
+  selected_color: string | null;
+};
+
+type PlaceOrderInput = {
+  userId: string;
+  dto: Pick<
+    CreateOrderDto,
+    | 'idempotency_key'
+    | 'expected_total'
+    | 'coupon_code'
+    | 'shipping_address'
+    | 'payment_method'
+    | 'delivery_zone'
+  >;
+  promotion: PromotionResult;
+  items: OrderItemSnapshot[];
+};
 
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
   private supabase = createSupabaseAdminClient();
+  constructor(
+    private readonly offers: OffersService,
+    private readonly promotions: PromotionsService,
+  ) {}
 
   /**
    * The decrement_stock trigger fails the order_items insert with a
@@ -37,16 +75,141 @@ export class OrdersService {
   }
 
   /**
-   * Clean up a half-created order when its items fail to insert.
-   * Best effort: if the cleanup itself fails there is nothing more we
-   * can do here; a stale 'pending' order is safer than losing the user
-   * an order that actually went through.
+   * Fingerprint of what the customer asked for. A retried request with the
+   * same idempotency key must match it; expected_total is excluded because
+   * it is a client-side guard, not part of the order.
    */
-  private async cleanupOrder(orderId: string) {
-    try {
-      await this.supabase.from('orders').delete().eq('id', orderId);
-    } catch {
-      // ignored — see method comment
+  private requestHash(input: PlaceOrderInput) {
+    const { dto, items } = input;
+    return createHash('sha256')
+      .update(
+        JSON.stringify({
+          coupon_code: dto.coupon_code ?? null,
+          shipping_address: dto.shipping_address,
+          payment_method: dto.payment_method,
+          delivery_zone: dto.delivery_zone,
+          items: items.map((item) => [
+            item.product_id,
+            item.quantity,
+            item.selected_size,
+            item.selected_color,
+          ]),
+        }),
+      )
+      .digest('hex');
+  }
+
+  /**
+   * Price check, then one place_order() transaction: the order header and
+   * its items (whose insert decrements stock) commit or roll back together,
+   * and a repeated idempotency key replays the original order.
+   */
+  private async placeOrder(input: PlaceOrderInput) {
+    const { userId, dto, promotion, items } = input;
+    const subtotal = promotion.subtotal;
+    const shippingCost = calculateShippingCost(dto.delivery_zone);
+    const tax = calculateTax(subtotal);
+    const total = subtotal + shippingCost + tax;
+
+    if (
+      dto.expected_total !== undefined &&
+      Math.abs(roundMoney(total) - dto.expected_total) > 0.005
+    ) {
+      throw new ConflictException(
+        'Checkout totals changed. Review the updated total and place your order again.',
+      );
+    }
+
+    const { data, error } = await this.supabase.rpc('place_order', {
+      p_user_id: userId,
+      p_idempotency_key: dto.idempotency_key ?? null,
+      p_request_hash: this.requestHash(input),
+      p_order: {
+        subtotal: roundMoney(subtotal),
+        shipping_cost: shippingCost,
+        tax: roundMoney(tax),
+        total: roundMoney(total),
+        shipping_address: dto.shipping_address,
+        payment_method: dto.payment_method,
+        delivery_zone: dto.delivery_zone,
+        original_subtotal: roundMoney(promotion.original_subtotal),
+        combo_discount: roundMoney(promotion.combo_discount),
+        coupon_discount: roundMoney(promotion.coupon_discount),
+        discount_total: roundMoney(promotion.discount_total),
+        coupon_code: promotion.coupon_code,
+        applied_combos: promotion.applied_combos,
+        coupon_max_redemptions:
+          promotion.coupon_limits?.max_redemptions ?? null,
+        coupon_per_customer_limit:
+          promotion.coupon_limits?.per_customer_limit ?? null,
+      },
+      p_items: items,
+    });
+
+    if (error) {
+      if (error.message?.includes('coupon_customer_limit_reached')) {
+        throw new ConflictException(
+          'You have already used this coupon the maximum number of times. Remove it and try again.',
+        );
+      }
+      if (error.message?.includes('coupon_limit_reached')) {
+        throw new ConflictException(
+          'This coupon has just reached its usage limit. Remove it and try again.',
+        );
+      }
+      if (error.message?.includes('idempotency_key_reused')) {
+        throw new ConflictException(
+          'This checkout was already submitted with different details. Refresh the page and try again.',
+        );
+      }
+      if (this.isOversellError(error.message)) {
+        throw new ConflictException('Insufficient stock for one or more items');
+      }
+      this.logger.error(`place_order failed: ${error.message}`);
+      throw new InternalServerErrorException('Failed to create order');
+    }
+
+    const result = data as { order_id: string; replayed: boolean };
+    return { orderId: result.order_id, replayed: result.replayed };
+  }
+
+  /**
+   * Validated size/colour for each line, in line order. Fails the whole
+   * request on the first invalid choice so nothing is stored.
+   */
+  private resolveVariants(
+    lines: Array<{
+      product: VariantOptions | null | undefined;
+      selected_size?: string | null;
+      selected_color?: string | null;
+    }>,
+  ) {
+    return lines.map((line) => {
+      const variant = resolveVariant(
+        line.product ?? {},
+        line.selected_size,
+        line.selected_color,
+      );
+      if (variant.error !== undefined)
+        throw new BadRequestException(variant.error);
+      return variant;
+    });
+  }
+
+  /**
+   * Empty the server cart once the order is committed. Best effort: the
+   * order already succeeded, so a failure here is logged, never surfaced
+   * as a failed purchase and never undoes the order.
+   */
+  private async clearCart(userId: string, orderId: string) {
+    const { error } = await this.supabase
+      .from('cart_items')
+      .delete()
+      .eq('user_id', userId);
+    if (error) {
+      this.logger.warn(
+        `Order ${orderId} placed but cart clear failed: ${error.message}`,
+      );
     }
   }
 
@@ -87,7 +250,9 @@ export class OrdersService {
   async create(userId: string, dto: CreateOrderDto) {
     const { data: cartItems, error: cartError } = await this.supabase
       .from('cart_items')
-      .select('*, products(id, name, price, images, stock_quantity, stock)')
+      .select(
+        '*, products(id, name, price, images, stock_quantity, stock, sizes, colors)',
+      )
       .eq('user_id', userId);
 
     if (cartError)
@@ -96,81 +261,57 @@ export class OrdersService {
       throw new BadRequestException('Cart is empty');
     }
 
+    const prices = await this.offers.prices();
+    for (const item of cartItems) {
+      if (item.products)
+        item.products.price = Math.min(
+          item.products.price,
+          prices.get(item.products.id) ?? item.products.price,
+        );
+    }
     this.assertCartStock(cartItems);
-
-    const subtotal = cartItems.reduce(
-      (sum, item) => sum + (item.products?.price || 0) * item.quantity,
-      0,
+    const variants = this.resolveVariants(
+      cartItems.map((item) => ({ ...item, product: item.products })),
     );
-    const shippingCost = calculateShippingCost(dto.delivery_zone);
-    const tax = calculateTax(subtotal);
-    const total = subtotal + shippingCost + tax;
 
-    const { data: order, error: orderError } = await this.supabase
-      .from('orders')
-      .insert({
-        user_id: userId,
-        status: 'pending',
-        subtotal: roundMoney(subtotal),
-        shipping_cost: shippingCost,
-        tax: roundMoney(tax),
-        total: roundMoney(total),
-        shipping_address: dto.shipping_address,
-        payment_method: dto.payment_method,
-        delivery_zone: dto.delivery_zone,
-        payment_status: 'pending',
-      })
-      .select()
-      .single();
+    const promotion = await this.promotions.apply(
+      cartItems.map((item) => ({
+        product_id: item.product_id,
+        price: item.products?.price || 0,
+        quantity: item.quantity,
+      })),
+      dto.coupon_code,
+      userId,
+    );
 
-    if (orderError)
-      throw new InternalServerErrorException('Failed to create order');
+    const { orderId, replayed } = await this.placeOrder({
+      userId,
+      dto,
+      promotion,
+      items: promotion.priced_lines.map((priced) => {
+        const item = cartItems[priced.line_index];
+        return {
+          product_id: item.product_id,
+          product_name: item.products?.name || '',
+          product_image: item.products?.images?.[0] || null,
+          price: priced.price,
+          original_price: item.products?.price || 0,
+          quantity: priced.quantity,
+          selected_size: variants[priced.line_index].size,
+          selected_color: variants[priced.line_index].color,
+        };
+      }),
+    });
 
-    const orderItems = cartItems.map((item) => ({
-      order_id: order.id,
-      product_id: item.product_id,
-      product_name: item.products?.name || '',
-      product_image: item.products?.images?.[0] || null,
-      price: item.products?.price || 0,
-      quantity: item.quantity,
-      selected_size: item.selected_size,
-      selected_color: item.selected_color,
-    }));
-
-    const { error: itemsError } = await this.supabase
-      .from('order_items')
-      .insert(orderItems);
-    if (itemsError) {
-      await this.cleanupOrder(order.id);
-      if (this.isOversellError(itemsError.message)) {
-        throw new ConflictException('Insufficient stock for one or more items');
-      }
-      throw new BadRequestException('Failed to create order items');
-    }
-
-    // Only empty the cart once the order and its items are durable.
-    const { error: cartDeleteError } = await this.supabase
-      .from('cart_items')
-      .delete()
-      .eq('user_id', userId);
-    if (cartDeleteError) {
-      // The order is placed; a leftover cart must never be reported as
-      // a failed purchase. Best effort cleanup of the duplicate so the
-      // user isn't charged conceptually twice.
-      await this.cleanupOrder(order.id);
-      throw new InternalServerErrorException(
-        'Order created but cart could not be cleared. Please check your orders.',
-      );
-    }
-
-    return this.findById(order.id, userId);
+    if (!replayed) await this.clearCart(userId, orderId);
+    return this.findById(orderId, userId);
   }
 
   async checkout(userId: string, dto: CheckoutOrderDto) {
     const productIds = dto.items.map((i) => i.product_id);
     const { data: products, error: prodError } = await this.supabase
       .from('products')
-      .select('id, name, price, images, stock_quantity, stock')
+      .select('id, name, price, images, stock_quantity, stock, sizes, colors')
       .in('id', productIds);
 
     if (prodError)
@@ -179,81 +320,56 @@ export class OrdersService {
       throw new BadRequestException('One or more products are invalid');
     }
 
-    const productMap = new Map(products.map((p) => [p.id, p]));
+    const pricedProducts = await this.offers.priceProducts(products);
+    const productMap = new Map(pricedProducts.map((p) => [p.id, p]));
     this.assertCheckoutStock(dto.items, productMap);
+    const variants = this.resolveVariants(
+      dto.items.map((item) => ({
+        ...item,
+        product: productMap.get(item.product_id),
+      })),
+    );
 
-    const subtotal = dto.items.reduce((sum, item) => {
-      const product = productMap.get(item.product_id)!;
-      return sum + product.price * item.quantity;
-    }, 0);
-    const shippingCost = calculateShippingCost(dto.delivery_zone);
-    const tax = calculateTax(subtotal);
-    const total = subtotal + shippingCost + tax;
-
-    const { data: order, error: orderError } = await this.supabase
-      .from('orders')
-      .insert({
-        user_id: userId,
-        status: 'pending',
-        subtotal: roundMoney(subtotal),
-        shipping_cost: shippingCost,
-        tax: roundMoney(tax),
-        total: roundMoney(total),
-        shipping_address: dto.shipping_address,
-        payment_method: dto.payment_method,
-        delivery_zone: dto.delivery_zone,
-        payment_status: 'pending',
-      })
-      .select()
-      .single();
-
-    if (orderError)
-      throw new InternalServerErrorException('Failed to create order');
-
-    const orderItems = dto.items.map((item) => {
-      const product = productMap.get(item.product_id)!;
-      return {
-        order_id: order.id,
+    const promotion = await this.promotions.apply(
+      dto.items.map((item) => ({
         product_id: item.product_id,
-        product_name: product.name,
-        product_image: product.images?.[0] || null,
-        price: product.price,
+        price: productMap.get(item.product_id)!.price,
         quantity: item.quantity,
-        selected_size: item.selected_size || null,
-        selected_color: item.selected_color || null,
-      };
+      })),
+      dto.coupon_code,
+      userId,
+    );
+
+    const { orderId, replayed } = await this.placeOrder({
+      userId,
+      dto,
+      promotion,
+      items: promotion.priced_lines.map((priced) => {
+        const item = dto.items[priced.line_index];
+        const product = productMap.get(item.product_id)!;
+        return {
+          product_id: item.product_id,
+          product_name: product.name,
+          product_image: product.images?.[0] || null,
+          price: priced.price,
+          original_price: product.price,
+          quantity: priced.quantity,
+          selected_size: variants[priced.line_index].size,
+          selected_color: variants[priced.line_index].color,
+        };
+      }),
     });
 
-    const { error: itemsError } = await this.supabase
-      .from('order_items')
-      .insert(orderItems);
-    if (itemsError) {
-      await this.cleanupOrder(order.id);
-      if (this.isOversellError(itemsError.message)) {
-        throw new ConflictException('Insufficient stock for one or more items');
-      }
-      throw new BadRequestException('Failed to create order items');
+    if (!replayed) {
+      await this.supabase
+        .from('profiles')
+        .update({ shipping_address: dto.shipping_address })
+        .eq('id', userId);
+      // The client clears its own cart too; the server copy is best effort.
+      await this.clearCart(userId, orderId);
     }
 
-    await this.supabase
-      .from('profiles')
-      .update({ shipping_address: dto.shipping_address })
-      .eq('id', userId);
-
-    // Empty the server cart now that the order is durable. Best effort: the
-    // order already succeeded and the client clears its cart too, so a failure
-    // here must never surface as a failed purchase.
-    const { error: cartClearError } = await this.supabase
-      .from('cart_items')
-      .delete()
-      .eq('user_id', userId);
-    if (cartClearError) {
-      this.logger.warn(
-        `Order ${order.id} placed but cart clear failed: ${cartClearError.message}`,
-      );
-    }
-
-    return this.findById(order.id, userId);
+    return this.findById(orderId, userId);
   }
 
   async cancelOrder(orderId: string, userId: string) {
@@ -265,19 +381,27 @@ export class OrdersService {
       .single();
 
     if (findError || !order) throw new NotFoundException('Order not found');
-    if (order.status !== 'pending')
+    if (!canTransitionOrder(order.status, 'cancelled', 'customer'))
       throw new BadRequestException('Only pending orders can be cancelled');
 
-    // Restock is handled by DB trigger restock_on_cancel
+    // Conditional on still being pending: if an admin confirmed or shipped
+    // the order since it was read, no row matches and nothing is cancelled.
+    // Restock is handled by the DB trigger restock_on_cancel.
     const { data, error } = await this.supabase
       .from('orders')
       .update({ status: 'cancelled' })
       .eq('id', orderId)
+      .eq('user_id', userId)
+      .eq('status', 'pending')
       .select()
-      .single();
+      .maybeSingle();
 
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
+    if (!data)
+      throw new ConflictException(
+        'This order is already being processed and can no longer be cancelled.',
+      );
     return data;
   }
 

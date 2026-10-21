@@ -11,10 +11,13 @@ import type {
   MergeCartDto,
 } from './dto/cart-item.dto.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import { OffersService } from '../offers/offers.service.js';
+import { PromotionsService } from '../offers/promotions.service.js';
 import {
   availableStock,
   calculateShippingCost,
   calculateTax,
+  resolveVariant,
   roundMoney,
   type DeliveryZone,
 } from '../../common/utils/commerce.js';
@@ -23,6 +26,10 @@ import {
 export class CartService {
   private readonly logger = new Logger(CartService.name);
   private supabase = createSupabaseAdminClient();
+  constructor(
+    private readonly offers: OffersService,
+    private readonly promotions: PromotionsService,
+  ) {}
 
   async findByUser(userId: string) {
     const { data, error } = await this.supabase
@@ -35,13 +42,30 @@ export class CartService {
 
     if (error)
       throw new InternalServerErrorException('An internal error occurred');
-    return data || [];
+    const prices = await this.offers.prices();
+    return (data || []).map((item) => {
+      // PostgREST types embedded relations as an array; this FK is singular.
+      const product = item.products as unknown as {
+        id: string;
+        price: number;
+        original_price?: number | null;
+      } | null;
+      const price = product ? prices.get(product.id) : undefined;
+      if (product && price !== undefined && price < product.price) {
+        product.original_price = Math.max(
+          product.original_price ?? 0,
+          product.price,
+        );
+        product.price = price;
+      }
+      return item;
+    });
   }
 
   async addItem(userId: string, dto: AddCartItemDto) {
     const { data: product } = await this.supabase
       .from('products')
-      .select('stock, stock_quantity')
+      .select('name, stock, stock_quantity, sizes, colors')
       .eq('id', dto.product_id)
       .single();
 
@@ -53,6 +77,14 @@ export class CartService {
     if (stockQty <= 0) {
       throw new BadRequestException('Product is out of stock');
     }
+
+    const variant = resolveVariant(
+      product,
+      dto.selected_size,
+      dto.selected_color,
+    );
+    if (variant.error !== undefined)
+      throw new BadRequestException(variant.error);
 
     // `.eq(col, null)` sends `col=eq.null`, which never matches a SQL NULL — so
     // a no-variant product was never recognised as already in the cart. Match
@@ -66,11 +98,11 @@ export class CartService {
       .eq('user_id', userId)
       .eq('product_id', dto.product_id)
       .order('created_at', { ascending: true });
-    existingQuery = dto.selected_size
-      ? existingQuery.eq('selected_size', dto.selected_size)
+    existingQuery = variant.size
+      ? existingQuery.eq('selected_size', variant.size)
       : existingQuery.is('selected_size', null);
-    existingQuery = dto.selected_color
-      ? existingQuery.eq('selected_color', dto.selected_color)
+    existingQuery = variant.color
+      ? existingQuery.eq('selected_color', variant.color)
       : existingQuery.is('selected_color', null);
 
     const { data: existingRows } = await existingQuery;
@@ -112,8 +144,8 @@ export class CartService {
         user_id: userId,
         product_id: dto.product_id,
         quantity: dto.quantity,
-        selected_size: dto.selected_size || null,
-        selected_color: dto.selected_color || null,
+        selected_size: variant.size,
+        selected_color: variant.color,
       })
       .select()
       .single();
@@ -126,7 +158,7 @@ export class CartService {
   async updateItem(itemId: string, userId: string, dto: UpdateCartItemDto) {
     const { data: existing } = await this.supabase
       .from('cart_items')
-      .select('product_id')
+      .select('product_id, selected_size, selected_color')
       .eq('id', itemId)
       .eq('user_id', userId)
       .maybeSingle();
@@ -135,7 +167,7 @@ export class CartService {
 
     const { data: product } = await this.supabase
       .from('products')
-      .select('stock, stock_quantity')
+      .select('name, stock, stock_quantity, sizes, colors')
       .eq('id', existing.product_id)
       .single();
 
@@ -146,12 +178,26 @@ export class CartService {
       );
     }
 
+    // A quantity-only update keeps the stored size/colour instead of
+    // clearing it.
+    const variant = resolveVariant(
+      product ?? {},
+      dto.selected_size !== undefined
+        ? dto.selected_size
+        : existing.selected_size,
+      dto.selected_color !== undefined
+        ? dto.selected_color
+        : existing.selected_color,
+    );
+    if (variant.error !== undefined)
+      throw new BadRequestException(variant.error);
+
     const { data, error } = await this.supabase
       .from('cart_items')
       .update({
         quantity: dto.quantity,
-        selected_size: dto.selected_size || null,
-        selected_color: dto.selected_color || null,
+        selected_size: variant.size,
+        selected_color: variant.color,
       })
       .eq('id', itemId)
       .eq('user_id', userId)
@@ -206,7 +252,7 @@ export class CartService {
     // Batch stock lookup — single query for every item.
     const { data: products } = await this.supabase
       .from('products')
-      .select('id, stock, stock_quantity')
+      .select('id, name, stock, stock_quantity, sizes, colors')
       .in('id', productIds);
 
     const stockById = new Map(
@@ -249,7 +295,17 @@ export class CartService {
         continue;
       }
 
-      const key = `${item.product_id}|${item.selected_size ?? ''}|${item.selected_color ?? ''}`;
+      const variant = resolveVariant(
+        product,
+        item.selected_size,
+        item.selected_color,
+      );
+      if (variant.error !== undefined) {
+        skipped.push({ product_id: item.product_id, reason: variant.error });
+        continue;
+      }
+
+      const key = `${item.product_id}|${variant.size ?? ''}|${variant.color ?? ''}`;
       const existing = existingByKey.get(key);
 
       if (existing) {
@@ -268,8 +324,8 @@ export class CartService {
           user_id: userId,
           product_id: item.product_id,
           quantity: Math.min(item.quantity, stockQty),
-          selected_size: item.selected_size || null,
-          selected_color: item.selected_color || null,
+          selected_size: variant.size,
+          selected_color: variant.color,
         });
         mergedCount += 1;
       }
@@ -307,10 +363,15 @@ export class CartService {
   ) {
     const items = await this.findByUser(userId);
 
-    const subtotal = items.reduce(
-      (sum, item) => sum + ((item.products as any)?.price || 0) * item.quantity,
-      0,
+    const promotion = await this.promotions.apply(
+      items.map((item) => ({
+        product_id: item.product_id,
+        price:
+          (item.products as unknown as { price: number } | null)?.price ?? 0,
+        quantity: item.quantity,
+      })),
     );
+    const subtotal = promotion.subtotal;
     const shippingCost = calculateShippingCost(deliveryZone);
     const tax = calculateTax(subtotal);
     const total = subtotal + shippingCost + tax;
@@ -319,6 +380,10 @@ export class CartService {
       items,
       delivery_zone: deliveryZone,
       subtotal: roundMoney(subtotal),
+      original_subtotal: promotion.original_subtotal,
+      combo_discount: promotion.combo_discount,
+      discount_total: promotion.discount_total,
+      applied_combos: promotion.applied_combos,
       shipping_cost: shippingCost,
       tax: roundMoney(tax),
       total: roundMoney(total),
