@@ -487,7 +487,7 @@ export class AdminService {
       .eq('id', userId)
       .single();
     if (!data) throw new NotFoundException('User not found');
-    return data as { id: string; role: string };
+    return data;
   }
 
   async updateUserRole(userId: string, role: string, actorId: string) {
