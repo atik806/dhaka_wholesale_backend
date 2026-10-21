@@ -85,7 +85,7 @@ ADMIN_PASSWORD=your-strong-admin-password
 
 ### 3. Set up the database
 
-Run `supabase-schema.sql` (and then `supabase-migration.sql`) in the Supabase SQL Editor, or apply migrations from `supabase/migrations/`. To load sample data:
+The canonical schema is the timestamped migrations in `supabase/migrations/`, applied in filename order (for example `supabase db push`, or each file in the SQL Editor). `supabase-schema.sql`, `supabase-migration.sql` and `scripts/apply-pending-db.sql` are legacy snapshots kept for reference; do not use them to bootstrap a new database. To load sample data:
 
 ```bash
 npm run seed
