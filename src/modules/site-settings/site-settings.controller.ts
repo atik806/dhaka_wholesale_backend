@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { SiteSettingsService } from './site-settings.service.js';
+import { PUBLIC_POLL_CACHE_CONTROL } from '../../common/interceptors/http-cache.interceptor.js';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
@@ -28,7 +29,7 @@ export class SiteSettingsController {
   }
 
   @Get(':key')
-  @Header('Cache-Control', 'no-store')
+  @Header('Cache-Control', PUBLIC_POLL_CACHE_CONTROL)
   @ApiOperation({ summary: 'Get a specific site setting (public)' })
   async get(@Param('key') key: string) {
     return this.siteSettingsService.get(key);

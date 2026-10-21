@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { z } from 'zod';
+import { PUBLIC_POLL_CACHE_CONTROL } from '../../common/interceptors/http-cache.interceptor.js';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
@@ -48,7 +49,7 @@ function expectedVersion(header: string | undefined): ExpectedVersion {
 export class PromotionsController {
   constructor(private readonly promotions: PromotionsService) {}
   @Get('combos')
-  @Header('Cache-Control', 'no-store')
+  @Header('Cache-Control', PUBLIC_POLL_CACHE_CONTROL)
   combos() {
     return this.promotions.activeCombos();
   }
