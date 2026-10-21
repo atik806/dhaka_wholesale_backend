@@ -47,4 +47,4 @@ Global exception filter handles:
 
 ## Database
 - PostgreSQL via Supabase
-- Schema defined in supabase-schema.sql
+- Schema defined by the timestamped migrations in supabase/migrations (supabase-schema.sql is a legacy snapshot)
