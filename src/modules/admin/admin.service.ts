@@ -76,7 +76,7 @@ export class AdminService {
       this.supabase
         .from('orders')
         .select(
-          'id, total, status, created_at, payment_status, profiles(name, email)',
+          'id, total, status, created_at, payment_status, profiles!orders_user_id_fkey(name, email)',
         )
         .order('created_at', { ascending: false })
         .limit(5),
@@ -185,7 +185,7 @@ export class AdminService {
 
     let sb = this.supabase
       .from('orders')
-      .select('*, profiles(name, email)', { count: 'exact' });
+      .select('*, profiles!orders_user_id_fkey(name, email)', { count: 'exact' });
 
     if (query.status) {
       sb = sb.eq('status', query.status);
@@ -231,7 +231,7 @@ export class AdminService {
   async getOrderDetail(orderId: string) {
     const { data, error } = await this.supabase
       .from('orders')
-      .select('*, order_items(*), profiles(name, email)')
+      .select('*, order_items(*), profiles!orders_user_id_fkey(name, email)')
       .eq('id', orderId)
       .single();
 
