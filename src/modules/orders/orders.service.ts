@@ -138,11 +138,25 @@ export class OrdersService {
         discount_total: roundMoney(promotion.discount_total),
         coupon_code: promotion.coupon_code,
         applied_combos: promotion.applied_combos,
+        coupon_max_redemptions:
+          promotion.coupon_limits?.max_redemptions ?? null,
+        coupon_per_customer_limit:
+          promotion.coupon_limits?.per_customer_limit ?? null,
       },
       p_items: items,
     });
 
     if (error) {
+      if (error.message?.includes('coupon_customer_limit_reached')) {
+        throw new ConflictException(
+          'You have already used this coupon the maximum number of times. Remove it and try again.',
+        );
+      }
+      if (error.message?.includes('coupon_limit_reached')) {
+        throw new ConflictException(
+          'This coupon has just reached its usage limit. Remove it and try again.',
+        );
+      }
       if (error.message?.includes('idempotency_key_reused')) {
         throw new ConflictException(
           'This checkout was already submitted with different details. Refresh the page and try again.',
@@ -267,6 +281,7 @@ export class OrdersService {
         quantity: item.quantity,
       })),
       dto.coupon_code,
+      userId,
     );
 
     const { orderId, replayed } = await this.placeOrder({
@@ -322,6 +337,7 @@ export class OrdersService {
         quantity: item.quantity,
       })),
       dto.coupon_code,
+      userId,
     );
 
     const { orderId, replayed } = await this.placeOrder({

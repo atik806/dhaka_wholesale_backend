@@ -28,7 +28,11 @@ export class CheckoutService {
    */
   async quote(userId: string, dto: CheckoutQuoteDto) {
     const lines = await this.resolveLines(userId, dto.items);
-    const promotion = await this.promotions.apply(lines, dto.coupon_code);
+    const promotion = await this.promotions.apply(
+      lines,
+      dto.coupon_code,
+      userId,
+    );
     const subtotal = promotion.subtotal;
     const shippingCost = calculateShippingCost(dto.delivery_zone);
     const tax = calculateTax(subtotal);

@@ -70,6 +70,7 @@ describe('Offer API authorization and validation', () => {
             activeCombos: async () => [],
             combos: async () => [],
             coupons: async () => [],
+            managed: () => Promise.resolve({ combos: [], coupons: [] }),
             saveCombo,
             saveCoupon,
             removeCombo,
@@ -163,8 +164,14 @@ describe('Offer API authorization and validation', () => {
       .send(coupon)
       .expect(200);
     expect(saveCoupon).toHaveBeenCalledWith(
-      { ...coupon, code: 'SAVE10' },
+      {
+        ...coupon,
+        code: 'SAVE10',
+        max_redemptions: null,
+        per_customer_limit: null,
+      },
       'admin',
+      undefined,
     );
     await request(app.getHttpServer())
       .put('/offers/combos')

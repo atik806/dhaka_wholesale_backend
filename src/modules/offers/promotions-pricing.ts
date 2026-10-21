@@ -66,6 +66,22 @@ export const CouponSchema = z
     value: money,
     minimum_spend: z.number().min(0).max(1_000_000).multipleOf(0.01).default(0),
     maximum_discount: money.nullable().default(null),
+    // Usage limits; null means unlimited (and is what coupons saved before
+    // limits existed parse to). Enforced by place_order() under a lock.
+    max_redemptions: z
+      .number()
+      .int()
+      .min(1)
+      .max(1_000_000)
+      .nullable()
+      .default(null),
+    per_customer_limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(1_000)
+      .nullable()
+      .default(null),
   })
   .strict()
   .superRefine((value, ctx) => {
