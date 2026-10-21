@@ -469,9 +469,43 @@ export class AdminService {
     return profile;
   }
 
-  async updateUserRole(userId: string, role: string) {
+  /** Accounts that can still sign in to the admin panel. */
+  private async countAdmins() {
+    const { count, error } = await this.supabase
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('role', 'admin');
+    if (error)
+      throw new InternalServerErrorException('An internal error occurred');
+    return count ?? 0;
+  }
+
+  private async findProfileRole(userId: string) {
+    const { data } = await this.supabase
+      .from('profiles')
+      .select('id, role')
+      .eq('id', userId)
+      .single();
+    if (!data) throw new NotFoundException('User not found');
+    return data as { id: string; role: string };
+  }
+
+  async updateUserRole(userId: string, role: string, actorId: string) {
     if (!['customer', 'admin'].includes(role)) {
       throw new BadRequestException('Role must be customer or admin');
+    }
+
+    // Never lock everyone out of the admin panel. (Two admins demoting each
+    // other at the same instant could still both succeed; acceptable for
+    // a small team, revisit with an RPC if that changes.)
+    if (role !== 'admin') {
+      if (userId === actorId)
+        throw new BadRequestException(
+          'You cannot remove your own admin access. Ask another admin.',
+        );
+      const target = await this.findProfileRole(userId);
+      if (target.role === 'admin' && (await this.countAdmins()) <= 1)
+        throw new ConflictException('At least one admin must remain.');
     }
 
     const { data, error } = await this.supabase
@@ -487,7 +521,27 @@ export class AdminService {
     return data;
   }
 
-  async deleteUser(userId: string) {
+  async deleteUser(userId: string, actorId: string) {
+    if (userId === actorId)
+      throw new BadRequestException('You cannot delete your own account.');
+
+    const target = await this.findProfileRole(userId);
+    if (target.role === 'admin' && (await this.countAdmins()) <= 1)
+      throw new ConflictException('At least one admin must remain.');
+
+    // orders.user_id cascades on delete (20260802), so deleting a customer
+    // with orders would silently erase their order history.
+    const { count: orderCount, error: orderError } = await this.supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId);
+    if (orderError)
+      throw new InternalServerErrorException('An internal error occurred');
+    if (orderCount)
+      throw new ConflictException(
+        `This account has ${orderCount} order${orderCount === 1 ? '' : 's'}; deleting it would erase that order history. Keep the account instead.`,
+      );
+
     const { error: authError } =
       await this.supabase.auth.admin.deleteUser(userId);
     if (authError) throw new InternalServerErrorException(authError.message);

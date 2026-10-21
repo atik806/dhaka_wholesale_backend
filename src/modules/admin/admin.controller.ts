@@ -249,11 +249,12 @@ export class AdminController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update user role' })
   async updateUserRole(
+    @CurrentUser() user: JwtUser,
     @Param('id', UuidParamPipe) id: string,
     @Body(new ZodValidationPipe(UpdateRoleSchema))
     body: { role: string },
   ) {
-    return this.adminService.updateUserRole(id, body.role);
+    return this.adminService.updateUserRole(id, body.role, user.id);
   }
 
   @Delete('users/:id')
@@ -261,8 +262,11 @@ export class AdminController {
   @Roles('admin')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete user' })
-  async deleteUser(@Param('id', UuidParamPipe) id: string) {
-    return this.adminService.deleteUser(id);
+  async deleteUser(
+    @CurrentUser() user: JwtUser,
+    @Param('id', UuidParamPipe) id: string,
+  ) {
+    return this.adminService.deleteUser(id, user.id);
   }
 
   @Get('staff')
