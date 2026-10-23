@@ -1,49 +1,29 @@
 import { randomUUID } from 'node:crypto';
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+import { compressImage } from './image-compress.js';
 
 const ALLOWED_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif']);
 
+/**
+ * File names are unique per upload and never overwritten, so the CDN and
+ * browsers can keep them for a year.
+ */
+const STORAGE_CACHE_CONTROL = '31536000';
+
 @Injectable()
 export class UploadService {
+  private readonly logger = new Logger(UploadService.name);
   private supabase = createSupabaseAdminClient();
-  private bucketInitPromise: Promise<void> | null = null;
+  private bucketInitPromises = new Map<string, Promise<void>>();
 
   async uploadImage(file: Express.Multer.File): Promise<string> {
-    const bucketName = 'product-images';
-
-    const fileExt = file.originalname.split('.').pop()?.toLowerCase() || '';
-    if (!ALLOWED_EXTENSIONS.has(fileExt)) {
-      throw new InternalServerErrorException(
-        `Invalid file extension: .${fileExt}. Allowed: ${[...ALLOWED_EXTENSIONS].join(', ')}`,
-      );
-    }
-
-    if (this.bucketInitPromise) {
-      await this.bucketInitPromise;
-    } else {
-      this.bucketInitPromise = this.ensureBucket(bucketName);
-      await this.bucketInitPromise;
-    }
-
-    const fileName = `${Date.now()}-${randomUUID()}.${fileExt}`;
-
-    const { error } = await this.supabase.storage
-      .from(bucketName)
-      .upload(fileName, file.buffer, {
-        contentType: file.mimetype,
-        cacheControl: '3600',
-        upsert: false,
-      });
-
-    if (error)
-      throw new InternalServerErrorException('Upload failed: ' + error.message);
-
-    const { data: publicUrl } = this.supabase.storage
-      .from(bucketName)
-      .getPublicUrl(fileName);
-
-    return publicUrl.publicUrl;
+    return this.uploadToBucket(file, 'product-images');
   }
 
   async uploadToBucket(
@@ -57,19 +37,23 @@ export class UploadService {
       );
     }
 
-    const { data: buckets } = await this.supabase.storage.listBuckets();
-    const bucketExists = buckets?.some((b) => b.name === bucketName);
-    if (!bucketExists) {
-      await this.supabase.storage.createBucket(bucketName, { public: true });
+    let compressed: Awaited<ReturnType<typeof compressImage>>;
+    try {
+      compressed = await compressImage(file.buffer);
+    } catch (err) {
+      this.logger.error(`Image compression failed: ${(err as Error).message}`);
+      throw new BadRequestException('Image could not be processed');
     }
 
-    const fileName = `${Date.now()}-${randomUUID()}.${fileExt}`;
+    await this.ensureBucket(bucketName);
+
+    const fileName = `${Date.now()}-${randomUUID()}.${compressed.extension}`;
 
     const { error } = await this.supabase.storage
       .from(bucketName)
-      .upload(fileName, file.buffer, {
-        contentType: file.mimetype,
-        cacheControl: '3600',
+      .upload(fileName, compressed.buffer, {
+        contentType: compressed.contentType,
+        cacheControl: STORAGE_CACHE_CONTROL,
         upsert: false,
       });
 
@@ -83,7 +67,20 @@ export class UploadService {
     return publicUrl.publicUrl;
   }
 
-  private async ensureBucket(bucketName: string): Promise<void> {
+  private ensureBucket(bucketName: string): Promise<void> {
+    let pending = this.bucketInitPromises.get(bucketName);
+    if (!pending) {
+      pending = this.createBucketIfMissing(bucketName).catch((err) => {
+        // Don't cache a failure; the next upload retries.
+        this.bucketInitPromises.delete(bucketName);
+        throw err;
+      });
+      this.bucketInitPromises.set(bucketName, pending);
+    }
+    return pending;
+  }
+
+  private async createBucketIfMissing(bucketName: string): Promise<void> {
     const { data: buckets } = await this.supabase.storage.listBuckets();
     const bucketExists = buckets?.some((b) => b.name === bucketName);
     if (!bucketExists) {

@@ -54,3 +54,4 @@ pids
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 .vercel
 .env*
+scripts/output/
