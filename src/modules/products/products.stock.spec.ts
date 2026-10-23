@@ -66,6 +66,62 @@ describe('product stock updates', () => {
   });
 });
 
+describe('product slug on save', () => {
+  const id = '00000000-0000-4000-8000-000000000002';
+  let update: jest.Mock;
+  let service: ProductsService;
+
+  beforeEach(() => {
+    update = jest.fn((value: Record<string, unknown>) => {
+      const chain = {
+        eq: () => chain,
+        select: () => ({
+          single: () =>
+            Promise.resolve({ data: { id, ...value }, error: null }),
+        }),
+      };
+      return chain;
+    });
+    jest.mocked(createSupabaseAdminClient).mockReturnValue({
+      from: () => {
+        const read = {
+          eq: (column: string) => {
+            // The slug-collision lookup filters by slug; the current-row
+            // lookup filters by id.
+            read.byId = column === 'id';
+            return read;
+          },
+          neq: () => read,
+          byId: false,
+          maybeSingle: () =>
+            Promise.resolve({
+              data: read.byId ? { name: 'Crystal Flower Brooch' } : null,
+              error: null,
+            }),
+        };
+        return { select: () => read, update };
+      },
+    } as never);
+    service = new ProductsService(
+      {} as CategoriesService,
+      { deleteByPrefix: jest.fn() } as unknown as CacheStore,
+      {} as OffersService,
+    );
+  });
+
+  it('keeps the slug when a save resends the same name', async () => {
+    await service.update(id, { name: 'Crystal Flower Brooch' });
+    expect(update.mock.calls[0][0]).not.toHaveProperty('slug');
+  });
+
+  it('gives a renamed product a new slug', async () => {
+    await service.update(id, { name: 'Rose Brooch' });
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ slug: 'rose-brooch' }),
+    );
+  });
+});
+
 describe('product stock stats', () => {
   function serviceWith(
     counts: Record<string, number>,

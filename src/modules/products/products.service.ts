@@ -315,7 +315,16 @@ export class ProductsService {
   async update(id: string, dto: UpdateProductDto) {
     const updatedData: Record<string, any> = { ...dto };
 
-    if (dto.name) {
+    // The admin form sends the name on every save. Only a real rename gets a
+    // new slug: regenerating it on each save broke shared product links.
+    const { data: current } = dto.name
+      ? await this.supabase
+          .from('products')
+          .select('name')
+          .eq('id', id)
+          .maybeSingle()
+      : { data: null };
+    if (dto.name && dto.name.trim() !== current?.name?.trim()) {
       let newSlug = dto.name
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
