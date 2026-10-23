@@ -110,6 +110,9 @@ async function main() {
 
   for (const url of urls) {
     const path = decodeURIComponent(url.slice(publicPrefix.length));
+    // Already processed (by this script or by the upload path): re-encoding
+    // a lossy WebP only loses quality, so a re-run is a no-op.
+    if (path.toLowerCase().endsWith('.webp')) continue;
     const { data: blob, error } = await supabase.storage.from(BUCKET).download(path);
     if (error || !blob) {
       console.warn(`  skip (download failed): ${path} ${error?.message ?? ''}`);
