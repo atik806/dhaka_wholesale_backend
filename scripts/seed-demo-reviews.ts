@@ -34,15 +34,15 @@ const demoReviews: DemoReview[] = [
     reviewerName: 'Nusrat Jahan',
     productSlug: 'qcy-melobuds-n50-adaptive-anc-true-wireless-earbuds-pruple',
     rating: 5,
-    text: 'Noise cancellation works well during my daily bus commute, and the bass is clear without sounding muddy. The purple colour also matches the photos. Delivery to Mirpur took two days.',
+    text: 'ANC blocks out the bus noise on my commute, and the bass is punchy without getting muddy. The purple looks exactly like the photos.',
     daysAgo: 2,
   },
   {
     reviewerSlug: 'sadiya-rahman',
     reviewerName: 'Sadiya Rahman',
-    productSlug: 'crystal-floral-hair-claw-clip-pink-and-amber',
+    productSlug: 'crystal-floral-hair-claw-clip-assorted-colors',
     rating: 4,
-    text: 'The clip looks just like the picture and holds my thick hair for around four to five hours. Packaging was careful, although I expected the spring to feel a little tighter.',
+    text: "Holds my thick hair all afternoon and looks just like the picture. The spring could be a little firmer, but it's lovely for the price.",
     daysAgo: 5,
   },
   {
@@ -50,7 +50,7 @@ const demoReviews: DemoReview[] = [
     reviewerName: 'Tanvir Hasan',
     productSlug: 'vgr-v-052-trimmer-hair-clipper-beard-trimmer',
     rating: 4,
-    text: 'Gives an even trim and did not pull my beard. USB charging is convenient and the battery easily handled two full trims. The guard feels slightly light, but the trimmer itself is solid for the price.',
+    text: 'Even trim with no pulling, and one charge lasted two full trims. The guard feels a bit light, but the trimmer itself is solid.',
     daysAgo: 9,
   },
   {
@@ -58,7 +58,7 @@ const demoReviews: DemoReview[] = [
     reviewerName: 'Farzana Akter',
     productSlug: 'daisy-bracelet',
     rating: 5,
-    text: 'Simple, neat design and comfortable on my wrist. I wore it twice for long events and the colour still looks fresh. It also arrived in a nice little pouch.',
+    text: 'Light, neat and comfortable all evening. It still looks new after a few wears, and it came in a nice little pouch.',
     daysAgo: 14,
   },
   {
@@ -66,7 +66,7 @@ const demoReviews: DemoReview[] = [
     reviewerName: 'Imran Hossain',
     productSlug: 'triangle-wooden-style-digital-led-clock-dark-wood',
     rating: 4,
-    text: 'The display is easy to read at night and the dark wood finish looks good on my desk. Setup took a few tries because the instructions are brief, but it has kept time accurately.',
+    text: 'Easy to read at night, and the dark wood looks great on my desk. The setup instructions are brief, but it keeps time well.',
     daysAgo: 20,
   },
   {
@@ -74,7 +74,7 @@ const demoReviews: DemoReview[] = [
     reviewerName: 'Mehedi Hasan',
     productSlug: '7-color-crocodile-shape-silicone-night-light-toy-for-kids',
     rating: 5,
-    text: 'Bought this for my niece and she loved it. The silicone is soft, the light is gentle enough for bedtime, and changing the colours is fun. It was packed safely with no damage.',
+    text: 'Got it for my niece and she loves it. Soft silicone, a gentle bedtime glow, and the colour change is fun. It arrived well packed.',
     daysAgo: 27,
   },
   {
@@ -82,7 +82,7 @@ const demoReviews: DemoReview[] = [
     reviewerName: 'Jannatul Ferdous',
     productSlug: 'silk-style-scrunchie-hair-band-assorted-colors',
     rating: 4,
-    text: 'The fabric feels smooth and does not tug at my hair. The colours I received were wearable for everyday use. A little more stretch would make it perfect, but it is good value.',
+    text: "Smooth fabric that doesn't tug my hair, in colours I can wear every day. A bit more stretch would be perfect, but it's great value.",
     daysAgo: 35,
   },
   {
@@ -90,7 +90,7 @@ const demoReviews: DemoReview[] = [
     reviewerName: 'Arif Mahmud',
     productSlug: 'hoco-ew76-true-wireless-bluetooth-earbuds',
     rating: 4,
-    text: 'Music and indoor calls sound clear, and the battery gets me through a normal workday. The microphone picks up some traffic noise outdoors, but overall this is a dependable budget option.',
+    text: "Clear music and indoor calls, and the battery lasts my workday. The mic picks up traffic outside, but it's a dependable budget pick.",
     daysAgo: 43,
   },
 ];
