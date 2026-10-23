@@ -104,3 +104,24 @@ export function resolveVariant(
     color: colors.length > 0 ? color! : null,
   };
 }
+
+/**
+ * The photo to store on an order line: the chosen colour's photo when the
+ * product links one, otherwise the product's first photo.
+ */
+export function variantImage(
+  product: {
+    images?: string[] | null;
+    colors?: Array<{
+      name?: string | null;
+      image?: string | null;
+    } | null> | null;
+  },
+  color: string | null,
+): string | null {
+  const images = product.images ?? [];
+  const linked = color
+    ? product.colors?.find((option) => option?.name === color)?.image
+    : null;
+  return (linked && images.includes(linked) ? linked : images[0]) || null;
+}

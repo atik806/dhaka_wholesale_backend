@@ -3,6 +3,11 @@ import { z } from 'zod';
 const ColorSchema = z.object({
   name: z.string(),
   hex: z.string(),
+  /**
+   * Product photo showing this colour; the storefront switches to it when
+   * the colour is picked. A bad URL drops only this field, not the colours.
+   */
+  image: z.string().url().max(2048).optional().catch(undefined),
 });
 
 const MAX_IMAGES = 12;

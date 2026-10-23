@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { BdMobileSchema, CheckoutOrderSchema } from './dto/create-order.dto.js';
-import { resolveVariant } from '../../common/utils/commerce.js';
+import { resolveVariant, variantImage } from '../../common/utils/commerce.js';
 import { OrdersService } from './orders.service.js';
 import { CartService } from '../cart/cart.service.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
@@ -101,6 +101,28 @@ describe('resolveVariant', () => {
       size: null,
       color: null,
     });
+  });
+});
+
+describe('variantImage', () => {
+  const product = {
+    images: ['https://cdn/a.jpg', 'https://cdn/purple.jpg'],
+    colors: [
+      { name: 'Purple', image: 'https://cdn/purple.jpg' },
+      { name: 'Red' },
+      { name: 'Gone', image: 'https://cdn/deleted.jpg' },
+    ],
+  };
+
+  it('uses the photo linked to the chosen colour', () => {
+    expect(variantImage(product, 'Purple')).toBe('https://cdn/purple.jpg');
+  });
+
+  it('falls back to the first photo without a usable link', () => {
+    expect(variantImage(product, 'Red')).toBe('https://cdn/a.jpg');
+    expect(variantImage(product, 'Gone')).toBe('https://cdn/a.jpg');
+    expect(variantImage(product, null)).toBe('https://cdn/a.jpg');
+    expect(variantImage({ images: [] }, null)).toBeNull();
   });
 });
 

@@ -19,6 +19,7 @@ import {
   calculateShippingCost,
   calculateTax,
   resolveVariant,
+  variantImage,
   roundMoney,
   type VariantOptions,
 } from '../../common/utils/commerce.js';
@@ -293,7 +294,9 @@ export class OrdersService {
         return {
           product_id: item.product_id,
           product_name: item.products?.name || '',
-          product_image: item.products?.images?.[0] || null,
+          product_image: item.products
+            ? variantImage(item.products, variants[priced.line_index].color)
+            : null,
           price: priced.price,
           original_price: item.products?.price || 0,
           quantity: priced.quantity,
@@ -350,7 +353,10 @@ export class OrdersService {
         return {
           product_id: item.product_id,
           product_name: product.name,
-          product_image: product.images?.[0] || null,
+          product_image: variantImage(
+            product,
+            variants[priced.line_index].color,
+          ),
           price: priced.price,
           original_price: product.price,
           quantity: priced.quantity,
