@@ -48,10 +48,29 @@ type PlaceOrderInput = {
     | 'shipping_address'
     | 'payment_method'
     | 'delivery_zone'
+    | 'notes'
   >;
   promotion: PromotionResult;
   items: OrderItemSnapshot[];
 };
+
+/** Longest customer message kept on an order. */
+export const ORDER_NOTE_MAX = 500;
+
+/** The customer's optional checkout message, trimmed; null when empty. */
+export function orderNote(notes?: string | null): string | null {
+  const note = notes?.trim().slice(0, ORDER_NOTE_MAX);
+  return note ? note : null;
+}
+
+/** Order address snapshot carrying the checkout message as `order_note`. */
+export function withOrderNote<T extends object>(
+  address: T,
+  notes?: string | null,
+): T & { order_note?: string } {
+  const note = orderNote(notes);
+  return note ? { ...address, order_note: note } : address;
+}
 
 @Injectable()
 export class OrdersService {
@@ -89,6 +108,7 @@ export class OrdersService {
           shipping_address: dto.shipping_address,
           payment_method: dto.payment_method,
           delivery_zone: dto.delivery_zone,
+          note: orderNote(dto.notes),
           items: items.map((item) => [
             item.product_id,
             item.quantity,
@@ -130,7 +150,10 @@ export class OrdersService {
         shipping_cost: shippingCost,
         tax: roundMoney(tax),
         total: roundMoney(total),
-        shipping_address: dto.shipping_address,
+        // The customer's optional message rides on the order's address
+        // snapshot (no column needed); the profile's saved address below
+        // never gets it.
+        shipping_address: withOrderNote(dto.shipping_address, dto.notes),
         payment_method: dto.payment_method,
         delivery_zone: dto.delivery_zone,
         original_subtotal: roundMoney(promotion.original_subtotal),

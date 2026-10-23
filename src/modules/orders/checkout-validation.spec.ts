@@ -1,7 +1,12 @@
 import { BadRequestException } from '@nestjs/common';
 import { BdMobileSchema, CheckoutOrderSchema } from './dto/create-order.dto.js';
 import { resolveVariant, variantImage } from '../../common/utils/commerce.js';
-import { OrdersService } from './orders.service.js';
+import {
+  ORDER_NOTE_MAX,
+  OrdersService,
+  orderNote,
+  withOrderNote,
+} from './orders.service.js';
 import { CartService } from '../cart/cart.service.js';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
 import { calculatePromotions } from '../offers/promotions-pricing.js';
@@ -101,6 +106,29 @@ describe('resolveVariant', () => {
       size: null,
       color: null,
     });
+  });
+});
+
+describe('checkout message', () => {
+  const address = { city: 'Dhaka' };
+
+  it('keeps a trimmed message on the order address snapshot', () => {
+    expect(withOrderNote(address, '  Call before delivery  ')).toEqual({
+      city: 'Dhaka',
+      order_note: 'Call before delivery',
+    });
+  });
+
+  it('adds nothing for an empty or missing message', () => {
+    expect(withOrderNote(address, '   ')).toBe(address);
+    expect(withOrderNote(address, undefined)).toBe(address);
+    expect(orderNote(null)).toBeNull();
+  });
+
+  it('caps a long message', () => {
+    expect(orderNote('x'.repeat(ORDER_NOTE_MAX + 50))).toHaveLength(
+      ORDER_NOTE_MAX,
+    );
   });
 });
 
