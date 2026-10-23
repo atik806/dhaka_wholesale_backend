@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Injectable,
   InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import { createSupabaseAdminClient } from '../../config/supabase.config.js';
 import { compressImage } from './image-compress.js';
@@ -17,6 +18,7 @@ const STORAGE_CACHE_CONTROL = '31536000';
 
 @Injectable()
 export class UploadService {
+  private readonly logger = new Logger(UploadService.name);
   private supabase = createSupabaseAdminClient();
   private bucketInitPromises = new Map<string, Promise<void>>();
 
@@ -38,7 +40,8 @@ export class UploadService {
     let compressed: Awaited<ReturnType<typeof compressImage>>;
     try {
       compressed = await compressImage(file.buffer);
-    } catch {
+    } catch (err) {
+      this.logger.error(`Image compression failed: ${(err as Error).message}`);
       throw new BadRequestException('Image could not be processed');
     }
 

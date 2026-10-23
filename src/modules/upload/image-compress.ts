@@ -1,5 +1,3 @@
-import sharp from 'sharp';
-
 /**
  * Longest edge kept for stored images. The product gallery renders at most
  * ~1080px wide, so 1600 leaves headroom for 1.5x screens without storing the
@@ -21,6 +19,9 @@ export interface CompressedImage {
  * raw admin uploads were PNGs with a 380 KB median and up to 2.8 MB.
  */
 export async function compressImage(input: Buffer): Promise<CompressedImage> {
+  // Loaded on first use: sharp is a native module, and a missing platform
+  // binary should break uploads only, not the whole API at boot.
+  const { default: sharp } = await import('sharp');
   const buffer = await sharp(input, { failOn: 'error' })
     .rotate() // apply EXIF orientation before metadata is dropped
     .resize({
