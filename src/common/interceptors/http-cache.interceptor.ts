@@ -79,7 +79,7 @@ export class HttpCacheInterceptor {
 
     if (cached !== undefined) {
       response.setHeader('X-Cache', 'HIT');
-      response.setHeader('Cache-Control', this.buildCacheControl(ttl, ttl));
+      response.setHeader('Cache-Control', this.buildCacheControl(ttl));
       response.setHeader('Vary', 'Accept-Encoding, Authorization');
       return of(cached);
     }
@@ -89,15 +89,18 @@ export class HttpCacheInterceptor {
         this.cacheStore.set(cacheKey, data, ttl);
 
         response.setHeader('X-Cache', 'MISS');
-        response.setHeader('Cache-Control', this.buildCacheControl(ttl, ttl));
+        response.setHeader('Cache-Control', this.buildCacheControl(ttl));
         response.setHeader('Vary', 'Accept-Encoding, Authorization');
       }),
     );
   }
 
-  private buildCacheControl(maxAge: number, ttl: number): string {
-    const swr = Math.max(ttl * 5, 300);
-    return `public, max-age=${maxAge}, s-maxage=${maxAge}, stale-while-revalidate=${swr}`;
+  // Browsers always revalidate (max-age=0): they can't be told when data
+  // changes, so a browser max-age kept showing stale counts after edits. The
+  // CDN holds the response for the TTL and may serve it stale for one more
+  // TTL while it refetches.
+  private buildCacheControl(ttl: number): string {
+    return `public, max-age=0, s-maxage=${ttl}, stale-while-revalidate=${ttl}`;
   }
 
   private generateKey(context: ExecutionContext): string {

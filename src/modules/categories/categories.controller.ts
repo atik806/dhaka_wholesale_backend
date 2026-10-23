@@ -31,13 +31,20 @@ import {
   type UpdateCategoryDto,
 } from './dto/update-category.dto.js';
 
+/**
+ * Category responses carry live product counts, which change whenever a
+ * product is added, moved or deleted. Only the in-memory cache is busted on
+ * those writes; the CDN copy is not, so keep it short-lived.
+ */
+const CATEGORY_CACHE_TTL = 15;
+
 @ApiTags('Categories')
 @Controller('categories')
 export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
   @Get()
-  @CacheTTL(600)
+  @CacheTTL(CATEGORY_CACHE_TTL)
   @ApiOperation({ summary: 'Get all categories (flat or tree)' })
   @ApiQuery({
     name: 'tree',
@@ -53,7 +60,7 @@ export class CategoriesController {
   }
 
   @Get(':slug')
-  @CacheTTL(600)
+  @CacheTTL(CATEGORY_CACHE_TTL)
   @ApiOperation({ summary: 'Get category by slug' })
   async findBySlug(@Param('slug') slug: string) {
     return this.categoriesService.findBySlug(slug);
