@@ -1,3 +1,4 @@
+import { requestContext } from '../common/auth/request-context.js';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 let _anonClient: SupabaseClient | null = null;
@@ -98,7 +99,13 @@ export function createSupabaseAdminClient(): SupabaseClient {
         const signal = init?.signal
           ? mergeAbortSignals(init.signal, controller.signal)
           : controller.signal;
-        return fetch(url, { ...init, signal }).finally(() =>
+        const headers = new Headers(init?.headers);
+        headers.delete('x-admin-actor');
+        headers.delete('x-request-id');
+        const context = requestContext.getStore();
+        if (context?.actorId) headers.set('x-admin-actor', context.actorId);
+        if (context?.requestId) headers.set('x-request-id', context.requestId);
+        return fetch(url, { ...init, headers, signal }).finally(() =>
           clearTimeout(timeoutId),
         );
       },

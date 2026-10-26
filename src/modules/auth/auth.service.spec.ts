@@ -36,6 +36,13 @@ describe('AuthService admin password management', () => {
     jest.mocked(createSupabaseAdminClient).mockReturnValue({
       auth: { admin: { createUser, updateUserById, signOut } },
       from,
+      rpc: async (_name: string, args: { p_user: string }) => ({
+        data: {
+          enabled: args.p_user !== 'customer-id',
+          groups: args.p_user === 'customer-id' ? [] : ['owner'],
+        },
+        error: null,
+      }),
     } as never);
     upsert.mockResolvedValue({ error: null });
     service = new AuthService();

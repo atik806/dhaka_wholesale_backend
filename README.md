@@ -131,3 +131,7 @@ Set the production environment variables (see `.env.example`) and make sure the 
 ## Related
 
 - Frontend: [dhaka-wholesale-frontend](../dhaka-wholesale-frontend)
+
+## Admin operations
+
+See [ADMIN_OPERATIONS.md](./ADMIN_OPERATIONS.md) for staff permissions, order review, deliveries, inventory, returns/refunds, notifications, reports, migration order, and verification. Apply the operations migrations before deploying the updated applications.

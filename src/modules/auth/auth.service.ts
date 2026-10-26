@@ -301,7 +301,7 @@ export class AuthService {
         .eq('id', sessionResult.user.id)
         .single();
 
-      if (error || !data || data.role !== 'admin') {
+      if (error || !data) {
         // Authentication can succeed for a customer. Revoke that new session
         // before denying admin access; never promote an arbitrary account.
         await this.logout(sessionResult.session.access_token);
@@ -310,12 +310,23 @@ export class AuthService {
       profile = data;
     }
 
+    const { data: access, error: accessError } = await this.supabaseAdmin.rpc(
+      'ops_access',
+      { p_user: sessionResult.user.id },
+    );
+    if (accessError || !access?.enabled || !access.groups?.length) {
+      await this.logout(sessionResult.session.access_token);
+      throw new UnauthorizedException(
+        'Admin access is disabled or unavailable',
+      );
+    }
+
     return {
       user: {
         id: sessionResult.user.id,
         email,
         name: profile.name,
-        role: 'admin' as const,
+        role: profile.role,
         phone: profile.phone,
         avatar_url: profile.avatar_url,
         shipping_address: profile.shipping_address,

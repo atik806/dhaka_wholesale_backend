@@ -1,3 +1,5 @@
+import { AuditContextInterceptor } from './common/interceptors/audit-context.interceptor.js';
+import { OperationsModule } from './modules/operations/operations.module.js';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
@@ -34,6 +36,7 @@ import { OffersModule } from './modules/offers/offers.module.js';
         limit: 60,
       },
     ]),
+    OperationsModule,
     AuthModule,
     CategoriesModule,
     ProductsModule,
@@ -50,6 +53,7 @@ import { OffersModule } from './modules/offers/offers.module.js';
   ],
   controllers: [AppController],
   providers: [
+    { provide: APP_INTERCEPTOR, useClass: AuditContextInterceptor },
     AppService,
     {
       provide: APP_GUARD,

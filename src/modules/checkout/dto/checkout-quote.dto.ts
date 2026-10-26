@@ -5,6 +5,8 @@ import { MAX_CHECKOUT_ITEMS } from '../../orders/dto/create-order.dto.js';
 const QuoteItemSchema = z.object({
   product_id: z.string().uuid(),
   quantity: z.number().int().min(1).max(999),
+  selected_size: z.string().max(100).nullable().optional(),
+  selected_color: z.string().max(100).nullable().optional(),
 });
 
 export const CheckoutQuoteSchema = z.object({

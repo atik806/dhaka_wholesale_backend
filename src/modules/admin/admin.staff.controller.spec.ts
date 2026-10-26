@@ -1,3 +1,7 @@
+import { createSupabaseAdminClient } from '../../config/supabase.config.js';
+jest.mock('../../config/supabase.config.js', () => ({
+  createSupabaseAdminClient: jest.fn(),
+}));
 import {
   ExecutionContext,
   INestApplication,
@@ -27,6 +31,15 @@ describe('Staff admin API', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
+    jest.mocked(createSupabaseAdminClient).mockReturnValue({
+      rpc: async (_name: string, args: { p_user: string }) => ({
+        data: {
+          enabled: args.p_user === id,
+          groups: args.p_user === id ? ['owner'] : [],
+        },
+        error: null,
+      }),
+    } as never);
     const module = await Test.createTestingModule({
       controllers: [AdminController],
       providers: [{ provide: AdminService, useValue: service }],
@@ -37,7 +50,10 @@ describe('Staff admin API', () => {
           const req = context.switchToHttp().getRequest();
           const role = req.headers['x-test-role'];
           if (!role) throw new UnauthorizedException();
-          req.user = { id, role };
+          req.user = {
+            id: role === 'admin' ? id : '00000000-0000-4000-8000-000000000001',
+            role,
+          };
           return true;
         },
       })
