@@ -44,6 +44,13 @@ describe('Offer API authorization and validation', () => {
       },
     } as never);
     jest.mocked(createSupabaseAdminClient).mockReturnValue({
+      rpc: async (_name: string, args: { p_user: string }) => ({
+        data: {
+          enabled: args.p_user === 'admin',
+          groups: args.p_user === 'admin' ? ['owner'] : [],
+        },
+        error: null,
+      }),
       from: () => ({
         select: () => ({
           eq: (_column: string, id: string) => ({

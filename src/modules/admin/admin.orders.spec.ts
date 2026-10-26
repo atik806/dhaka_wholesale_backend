@@ -14,7 +14,7 @@ function mockSupabase() {
   const selects: string[] = [];
   const from = (table: string) => {
     const chain: Record<string, unknown> = {};
-    for (const method of ['eq', 'or', 'order', 'range']) {
+    for (const method of ['eq', 'or', 'order', 'range', 'is']) {
       chain[method] = () => chain;
     }
     chain.select = (columns: string) => {

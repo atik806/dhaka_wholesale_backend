@@ -1,6 +1,7 @@
 import {
   Injectable,
   NotFoundException,
+  BadRequestException,
   ConflictException,
   InternalServerErrorException,
   Logger,
@@ -22,7 +23,7 @@ import {
 const PRODUCT_LIST_SELECT =
   'id, slug, name, price, original_price, images, rating, review_count, stock, stock_quantity, tags, sizes, colors, is_new, is_featured, created_at, category_id, categories(name, slug)';
 
-const PRODUCT_DETAIL_SELECT = '*, categories(name, slug)';
+const PRODUCT_DETAIL_SELECT = `${PRODUCT_LIST_SELECT}, description, updated_at`;
 
 @Injectable()
 export class ProductsService {
@@ -372,6 +373,7 @@ export class ProductsService {
       .select()
       .single();
 
+    if (error?.code === '23514') throw new BadRequestException(error.message);
     if (error) throw new NotFoundException('Product not found');
 
     this.invalidateProductCaches();

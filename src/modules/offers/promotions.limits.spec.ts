@@ -179,6 +179,8 @@ describe('coupon limits', () => {
 });
 
 describe('saving promotions without losing another admin’s edit', () => {
+  beforeEach(() => jest.spyOn(Date, 'now').mockReturnValue(now));
+  afterEach(() => jest.restoreAllMocks());
   it('refuses to create a coupon whose code was just created elsewhere', async () => {
     mockSupabase({ insertError: { code: '23505', message: 'duplicate key' } });
     await expect(

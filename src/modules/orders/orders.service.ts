@@ -241,7 +241,10 @@ export class OrdersService {
     const from = (page - 1) * limit;
     const { data, error, count } = await this.supabase
       .from('orders')
-      .select('*, order_items(*)', { count: 'exact' })
+      .select(
+        '*, order_items(id,order_id,product_id,product_name,product_image,price,quantity,selected_size,selected_color,created_at)',
+        { count: 'exact' },
+      )
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .range(from, from + limit - 1);
@@ -262,7 +265,9 @@ export class OrdersService {
   async findById(id: string, userId: string) {
     const { data, error } = await this.supabase
       .from('orders')
-      .select('*, order_items(*)')
+      .select(
+        '*, order_items(id,order_id,product_id,product_name,product_image,price,quantity,selected_size,selected_color,created_at)',
+      )
       .eq('id', id)
       .eq('user_id', userId)
       .single();

@@ -125,3 +125,28 @@ export function variantImage(
     : null;
   return (linked && images.includes(linked) ? linked : images[0]) || null;
 }
+
+export type InventoryProduct = {
+  stock_quantity?: number | null;
+  stock?: string | null;
+  inventory_mode?: string;
+  inventory_variants?: Array<{
+    size: string;
+    color: string;
+    stock_quantity: number;
+  }>;
+};
+export function variantStock(
+  product: InventoryProduct | null | undefined,
+  size?: string | null,
+  color?: string | null,
+): number {
+  if (!product) return 0;
+  if (product.inventory_mode !== 'variant')
+    return availableStock(product.stock_quantity, product.stock);
+  return (
+    product.inventory_variants?.find(
+      (v) => v.size === (size ?? '') && v.color === (color ?? ''),
+    )?.stock_quantity ?? 0
+  );
+}

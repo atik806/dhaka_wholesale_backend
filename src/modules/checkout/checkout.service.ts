@@ -8,7 +8,8 @@ import { createSupabaseAdminClient } from '../../config/supabase.config.js';
 import { OffersService } from '../offers/offers.service.js';
 import { PromotionsService } from '../offers/promotions.service.js';
 import {
-  availableStock,
+  variantStock,
+  type InventoryProduct,
   calculateShippingCost,
   calculateTax,
   roundMoney,
@@ -69,7 +70,12 @@ export class CheckoutService {
 
   private async resolveLines(
     userId: string,
-    items?: Array<{ product_id: string; quantity: number }>,
+    items?: Array<{
+      product_id: string;
+      quantity: number;
+      selected_size?: string | null;
+      selected_color?: string | null;
+    }>,
   ) {
     if (items && items.length > 0) {
       return this.quoteFromItems(items);
@@ -81,7 +87,7 @@ export class CheckoutService {
     const { data: cartItems, error } = await this.supabase
       .from('cart_items')
       .select(
-        'product_id, quantity, products(id, name, price, stock_quantity, stock)',
+        'product_id, quantity, selected_size, selected_color, products(id, name, price, stock_quantity, stock, inventory_mode, inventory_variants(size,color,stock_quantity))',
       )
       .eq('user_id', userId);
 
@@ -94,19 +100,25 @@ export class CheckoutService {
 
     const prices = await this.offers.prices();
     return cartItems.map((item) => {
-      const product = item.products as unknown as {
-        id: string;
-        name: string;
-        price: number;
-        stock_quantity: number | null;
-        stock: string;
-      } | null;
+      const product = item.products as unknown as
+        | ({
+            id: string;
+            name: string;
+            price: number;
+            stock_quantity: number | null;
+            stock: string;
+          } & InventoryProduct)
+        | null;
       if (product)
         product.price = Math.min(
           product.price,
           prices.get(product.id) ?? product.price,
         );
-      const stockQty = availableStock(product?.stock_quantity, product?.stock);
+      const stockQty = variantStock(
+        product,
+        item.selected_size,
+        item.selected_color,
+      );
       const qty = item.quantity;
       return {
         product_id: item.product_id,
@@ -115,18 +127,34 @@ export class CheckoutService {
         quantity: qty,
         line_total: roundMoney((product?.price || 0) * qty),
         stock_quantity: stockQty,
-        available: stockQty >= qty && stockQty > 0,
+        available:
+          stockQty >=
+            cartItems
+              .filter(
+                (other) =>
+                  other.product_id === item.product_id &&
+                  other.selected_size === item.selected_size &&
+                  other.selected_color === item.selected_color,
+              )
+              .reduce((sum, other) => sum + other.quantity, 0) && stockQty > 0,
       };
     });
   }
 
   private async quoteFromItems(
-    items: Array<{ product_id: string; quantity: number }>,
+    items: Array<{
+      product_id: string;
+      quantity: number;
+      selected_size?: string | null;
+      selected_color?: string | null;
+    }>,
   ) {
     const productIds = items.map((i) => i.product_id);
     const { data: products, error } = await this.supabase
       .from('products')
-      .select('id, name, price, stock_quantity, stock')
+      .select(
+        'id, name, price, stock_quantity, stock, inventory_mode, inventory_variants(size,color,stock_quantity)',
+      )
       .in('id', productIds);
 
     if (error) {
@@ -143,19 +171,32 @@ export class CheckoutService {
       throw new BadRequestException('One or more products are invalid');
     }
 
-    // Aggregate duplicate product_ids for stock checks
+    const keyFor = (item: (typeof items)[number]) => {
+      const product = productMap.get(item.product_id);
+      return product?.inventory_mode === 'variant'
+        ? JSON.stringify([
+            item.product_id,
+            item.selected_size ?? '',
+            item.selected_color ?? '',
+          ])
+        : item.product_id;
+    };
     const qtyByProduct = new Map<string, number>();
     for (const item of items) {
       qtyByProduct.set(
-        item.product_id,
-        (qtyByProduct.get(item.product_id) || 0) + item.quantity,
+        keyFor(item),
+        (qtyByProduct.get(keyFor(item)) || 0) + item.quantity,
       );
     }
 
     return items.map((item) => {
       const product = productMap.get(item.product_id)!;
-      const stockQty = availableStock(product.stock_quantity, product.stock);
-      const totalRequested = qtyByProduct.get(item.product_id) || item.quantity;
+      const stockQty = variantStock(
+        product,
+        item.selected_size,
+        item.selected_color,
+      );
+      const totalRequested = qtyByProduct.get(keyFor(item)) || item.quantity;
       return {
         product_id: item.product_id,
         name: product.name,

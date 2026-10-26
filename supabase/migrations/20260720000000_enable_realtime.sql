@@ -1,7 +1,11 @@
 -- Enable Realtime for all admin-facing tables
 
 -- Ensure the publication exists
-CREATE PUBLICATION IF NOT EXISTS supabase_realtime;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    CREATE PUBLICATION supabase_realtime;
+  END IF;
+END $$;
 
 -- Helper to add a table to the publication safely
 DO $$

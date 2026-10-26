@@ -14,7 +14,8 @@ import { createSupabaseAdminClient } from '../../config/supabase.config.js';
 import { OffersService } from '../offers/offers.service.js';
 import { PromotionsService } from '../offers/promotions.service.js';
 import {
-  availableStock,
+  variantStock,
+  type InventoryProduct,
   calculateShippingCost,
   calculateTax,
   resolveVariant,
@@ -35,7 +36,7 @@ export class CartService {
     const { data, error } = await this.supabase
       .from('cart_items')
       .select(
-        'id, user_id, product_id, quantity, selected_size, selected_color, created_at, products(id, name, slug, price, images, category_id, stock, stock_quantity, original_price, categories(name, slug))',
+        'id, user_id, product_id, quantity, selected_size, selected_color, created_at, products(id, name, slug, price, images, category_id, stock, stock_quantity, inventory_mode, inventory_variants(size,color,stock_quantity), original_price, categories(name, slug))',
       )
       .eq('user_id', userId)
       .order('created_at', { ascending: true });
@@ -45,11 +46,13 @@ export class CartService {
     const prices = await this.offers.prices();
     return (data || []).map((item) => {
       // PostgREST types embedded relations as an array; this FK is singular.
-      const product = item.products as unknown as {
-        id: string;
-        price: number;
-        original_price?: number | null;
-      } | null;
+      const product = item.products as unknown as
+        | ({
+            id: string;
+            price: number;
+            original_price?: number | null;
+          } & InventoryProduct)
+        | null;
       const price = product ? prices.get(product.id) : undefined;
       if (product && price !== undefined && price < product.price) {
         product.original_price = Math.max(
@@ -58,6 +61,15 @@ export class CartService {
         );
         product.price = price;
       }
+      if (product?.inventory_mode === 'variant') {
+        product.stock_quantity = variantStock(
+          product,
+          item.selected_size,
+          item.selected_color,
+        );
+        product.stock =
+          product.stock_quantity > 0 ? 'in-stock' : 'out-of-stock';
+      }
       return item;
     });
   }
@@ -65,7 +77,9 @@ export class CartService {
   async addItem(userId: string, dto: AddCartItemDto) {
     const { data: product } = await this.supabase
       .from('products')
-      .select('name, stock, stock_quantity, sizes, colors')
+      .select(
+        'name, stock, stock_quantity, sizes, colors, inventory_mode, inventory_variants(size,color,stock_quantity)',
+      )
       .eq('id', dto.product_id)
       .single();
 
@@ -73,7 +87,11 @@ export class CartService {
       throw new NotFoundException('Product not found');
     }
 
-    const stockQty = availableStock(product.stock_quantity, product.stock);
+    const stockQty = variantStock(
+      product,
+      dto.selected_size,
+      dto.selected_color,
+    );
     if (stockQty <= 0) {
       throw new BadRequestException('Product is out of stock');
     }
@@ -167,11 +185,21 @@ export class CartService {
 
     const { data: product } = await this.supabase
       .from('products')
-      .select('name, stock, stock_quantity, sizes, colors')
+      .select(
+        'name, stock, stock_quantity, sizes, colors, inventory_mode, inventory_variants(size,color,stock_quantity)',
+      )
       .eq('id', existing.product_id)
       .single();
 
-    const stockQty = availableStock(product?.stock_quantity, product?.stock);
+    const stockQty = variantStock(
+      product,
+      dto.selected_size !== undefined
+        ? dto.selected_size
+        : existing.selected_size,
+      dto.selected_color !== undefined
+        ? dto.selected_color
+        : existing.selected_color,
+    );
     if (dto.quantity > stockQty) {
       throw new BadRequestException(
         `Only ${stockQty} unit(s) available in stock`,
@@ -252,7 +280,9 @@ export class CartService {
     // Batch stock lookup — single query for every item.
     const { data: products } = await this.supabase
       .from('products')
-      .select('id, name, stock, stock_quantity, sizes, colors')
+      .select(
+        'id, name, stock, stock_quantity, sizes, colors, inventory_mode, inventory_variants(size,color,stock_quantity)',
+      )
       .in('id', productIds);
 
     const stockById = new Map(
@@ -286,7 +316,11 @@ export class CartService {
         continue;
       }
 
-      const stockQty = availableStock(product.stock_quantity, product.stock);
+      const stockQty = variantStock(
+        product,
+        item.selected_size,
+        item.selected_color,
+      );
       if (stockQty <= 0) {
         skipped.push({
           product_id: item.product_id,

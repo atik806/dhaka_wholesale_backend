@@ -24,8 +24,7 @@ database. Until it is applied, the page reports a staff loading error.
 
 A staff record stores name, email, phone, job title, department, profile image
 URL, start date, and availability (`active`, `inactive`, or `on_leave`).
-It does not create a login or grant permissions. Login accounts and administrator
-roles remain managed through the existing Users page. Marking a directory record
+It does not create a login or grant permissions. Login accounts are created through Users. The new Staff Access page optionally links a directory record to a login and grants permission groups; see [ADMIN_OPERATIONS.md](./ADMIN_OPERATIONS.md). Marking a directory record
 inactive changes availability only; it does not disable any login account.
 
 ## API

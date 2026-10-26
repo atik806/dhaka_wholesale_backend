@@ -213,6 +213,7 @@ export class AdminService {
     }
 
     const { data, error, count } = await sb
+      .is('archived_at', null)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -233,7 +234,9 @@ export class AdminService {
   async getOrderDetail(orderId: string) {
     const { data, error } = await this.supabase
       .from('orders')
-      .select('*, order_items(*), profiles!orders_user_id_fkey(name, email)')
+      .select(
+        '*, order_items(id,order_id,product_id,product_name,product_image,price,quantity,selected_size,selected_color,created_at), profiles!orders_user_id_fkey(name, email)',
+      )
       .eq('id', orderId)
       .single();
 
@@ -286,44 +289,14 @@ export class AdminService {
   }
 
   async deleteOrder(orderId: string) {
-    const { data: order } = await this.supabase
-      .from('orders')
-      .select('id, status')
-      .eq('id', orderId)
-      .single();
-
-    if (!order) throw new NotFoundException('Order not found');
-
-    // The restock trigger only fires on a status change to 'cancelled', never
-    // on DELETE. Deleting an order whose goods never left the warehouse
-    // (pending / confirmed) would silently leak the stock it decremented, so
-    // cancel it first to return inventory through the tested trigger path.
-    // A shipped / delivered order's goods are already gone — deleting those
-    // must NOT credit stock back; a cancelled order was already restocked.
-    const RESTOCK_BEFORE_DELETE = ['pending', 'confirmed'];
-    if (RESTOCK_BEFORE_DELETE.includes(order.status)) {
-      const { error: cancelError } = await this.supabase
-        .from('orders')
-        .update({ status: 'cancelled' })
-        .eq('id', orderId);
-
-      if (cancelError) {
-        this.logger.error(
-          `Failed to restock order ${orderId} before delete: ${cancelError.message}`,
-        );
-        throw new InternalServerErrorException('An internal error occurred');
-      }
-    }
-
-    const { error: orderError } = await this.supabase
-      .from('orders')
-      .delete()
-      .eq('id', orderId);
-
-    if (orderError)
-      throw new InternalServerErrorException('An internal error occurred');
-
-    return { message: 'Order deleted successfully' };
+    const { data, error } = await this.supabase.rpc('ops_archive_order', {
+      p_order: orderId,
+    });
+    if (error)
+      throw new ConflictException(
+        'Could not archive this order. Reload it and retry.',
+      );
+    return data;
   }
 
   async updatePaymentStatus(
@@ -331,6 +304,10 @@ export class AdminService {
     paymentStatus: string,
     actorId: string,
   ) {
+    if (paymentStatus === 'refunded')
+      throw new BadRequestException(
+        'Use Returns & Refunds to approve and record refunds.',
+      );
     if (!PAYMENT_STATUSES.includes(paymentStatus as PaymentStatus)) {
       throw new BadRequestException('Invalid payment status');
     }
