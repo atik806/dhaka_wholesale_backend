@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Header,
   Post,
   Patch,
   Delete,
@@ -17,6 +18,7 @@ import { Roles } from '../../common/decorators/roles.decorator.js';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
 import { UuidParamPipe } from '../../common/pipes/uuid-param.pipe.js';
 import { CacheTTL } from '../../common/decorators/cache.decorator.js';
+import { PUBLIC_POLL_CACHE_CONTROL } from '../../common/interceptors/http-cache.interceptor.js';
 import {
   CreateProductSchema,
   type CreateProductDto,
@@ -47,7 +49,7 @@ export class ProductsController {
   }
 
   @Get('featured')
-  @CacheTTL(600)
+  @Header('Cache-Control', PUBLIC_POLL_CACHE_CONTROL)
   @ApiOperation({ summary: 'Get featured products' })
   async getFeatured() {
     return this.productsService.getFeatured();
