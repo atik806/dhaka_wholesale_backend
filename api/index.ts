@@ -36,7 +36,10 @@ async function bootstrap() {
   const { TransformInterceptor } = await import(path.join(__dirname, '..', 'dist', 'src', 'common', 'interceptors', 'transform.interceptor.js'));
 
   const adapter = new ExpressAdapter(server);
-  app = await NestFactory.create(AppModule, adapter);
+  // Every cold start logs each mapped route (~150 lines); keep only problems.
+  app = await NestFactory.create(AppModule, adapter, {
+    logger: ['error', 'warn'],
+  });
 
   app.setGlobalPrefix('api');
 

@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Header,
   Post,
   Patch,
   Delete,
@@ -16,6 +17,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import type { JwtUser } from '../../common/decorators/current-user.decorator.js';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
 import { UuidParamPipe } from '../../common/pipes/uuid-param.pipe.js';
+import { PUBLIC_POLL_CACHE_CONTROL } from '../../common/interceptors/http-cache.interceptor.js';
 import {
   CreateReviewSchema,
   UpdateReviewSchema,
@@ -41,6 +43,7 @@ export class ReviewsController {
   constructor(private readonly reviewsService: ReviewsService) {}
 
   @Get('reviews/recent')
+  @Header('Cache-Control', PUBLIC_POLL_CACHE_CONTROL)
   @ApiOperation({ summary: 'Get recent reviews across all products' })
   async findRecent() {
     return this.reviewsService.findRecent();
