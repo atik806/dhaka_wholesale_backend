@@ -6,7 +6,7 @@ import {
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type {
   CreateOrderDto,
   CheckoutOrderDto,
@@ -24,6 +24,7 @@ import {
   type VariantOptions,
 } from '../../common/utils/commerce.js';
 import { canTransitionOrder } from './order-state.js';
+import { guestEmailFor } from './guest-customer.js';
 
 type PromotionResult = Awaited<ReturnType<PromotionsService['apply']>>;
 
@@ -336,6 +337,85 @@ export class OrdersService {
 
     if (!replayed) await this.clearCart(userId, orderId);
     return this.findById(orderId, userId);
+  }
+
+  /**
+   * Checkout without an account. The order is filed under a hidden customer
+   * profile for the phone number (see guest-customer.ts) and then placed
+   * through the normal checkout path, so pricing, stock, coupons and
+   * idempotency rules are identical to a signed-in checkout.
+   */
+  async guestCheckout(dto: CheckoutOrderDto) {
+    const { firstName, lastName, phone } = dto.shipping_address;
+    const name = `${firstName} ${lastName}`.trim();
+    const userId = await this.findOrCreateGuestCustomer(phone, name);
+    const order = await this.checkout(userId, dto);
+    return { ...order, guest: true };
+  }
+
+  private async findOrCreateGuestCustomer(
+    phone: string,
+    name: string,
+  ): Promise<string> {
+    const email = guestEmailFor(phone);
+    const existing = await this.supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', email)
+      .maybeSingle();
+    if (existing.data?.id) {
+      return this.assertGuestAccount(existing.data.id as string);
+    }
+
+    const created = await this.supabase.auth.admin.createUser({
+      email,
+      // Never shown to anyone: guests do not sign in to this account.
+      password: randomBytes(32).toString('base64url'),
+      email_confirm: true,
+      user_metadata: { guest: true, name },
+    });
+    if (created.error || !created.data.user) {
+      // Two guest checkouts for the same phone raced; use the winner.
+      const retry = await this.supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', email)
+        .maybeSingle();
+      if (retry.data?.id)
+        return this.assertGuestAccount(retry.data.id as string);
+      this.logger.error(
+        `Guest customer create failed: ${created.error?.message ?? 'no user'}`,
+      );
+      throw new InternalServerErrorException('Could not place the order');
+    }
+
+    const userId = created.data.user.id;
+    const { error } = await this.supabase
+      .from('profiles')
+      .upsert(
+        { id: userId, name: name || phone, email, phone, role: 'customer' },
+        { onConflict: 'id' },
+      );
+    if (error) {
+      this.logger.error(`Guest profile create failed: ${error.message}`);
+      await this.supabase.auth.admin.deleteUser(userId);
+      throw new InternalServerErrorException('Could not place the order');
+    }
+    return userId;
+  }
+
+  /**
+   * Only file a guest order under an account this code created. If someone
+   * ever managed to own the synthetic address, the order must not land in
+   * an account they can sign in to and read.
+   */
+  private async assertGuestAccount(userId: string): Promise<string> {
+    const { data, error } = await this.supabase.auth.admin.getUserById(userId);
+    if (error || data.user?.user_metadata?.guest !== true) {
+      this.logger.error(`Guest email owned by a non-guest account: ${userId}`);
+      throw new InternalServerErrorException('Could not place the order');
+    }
+    return userId;
   }
 
   async checkout(userId: string, dto: CheckoutOrderDto) {

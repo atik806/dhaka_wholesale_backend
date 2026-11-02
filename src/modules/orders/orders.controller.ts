@@ -7,6 +7,7 @@ import {
   Body,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { OrdersService } from './orders.service.js';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
@@ -65,6 +66,15 @@ export class OrdersController {
     @Body(new ZodValidationPipe(CheckoutOrderSchema)) dto: CheckoutOrderDto,
   ) {
     return this.ordersService.checkout(user.id, dto);
+  }
+
+  @Post('guest-checkout')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({ summary: 'Checkout without an account (phone required)' })
+  async guestCheckout(
+    @Body(new ZodValidationPipe(CheckoutOrderSchema)) dto: CheckoutOrderDto,
+  ) {
+    return this.ordersService.guestCheckout(dto);
   }
 
   @Patch(':id/cancel')

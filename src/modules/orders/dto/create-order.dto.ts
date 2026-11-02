@@ -19,11 +19,15 @@ export const BdMobileSchema = z
 const ShippingAddressSchema = z.object({
   firstName: z.string().trim().min(1).max(100),
   lastName: z.string().trim().min(1).max(100),
-  email: z.string().trim().email().max(254),
+  // Optional: most customers order by phone; COD is confirmed by a call.
+  email: z
+    .union([z.literal(''), z.string().trim().email().max(254)])
+    .optional(),
   phone: BdMobileSchema,
   address: z.string().trim().min(5).max(500),
   city: z.string().trim().min(2).max(100),
-  zipCode: z.string().trim().min(1).max(20),
+  // Optional: few Bangladeshi customers know their postcode.
+  zipCode: z.string().trim().max(20).optional(),
 });
 
 // Only payment methods the shop can actually settle are accepted. COD is the

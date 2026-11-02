@@ -26,3 +26,16 @@ export const CheckoutQuoteSchema = z.object({
 });
 
 export type CheckoutQuoteDto = z.infer<typeof CheckoutQuoteSchema>;
+
+/** Guests have no server cart, so their quote must list the items. */
+export const GuestCheckoutQuoteSchema = CheckoutQuoteSchema.extend({
+  items: z
+    .array(QuoteItemSchema)
+    .min(1)
+    .max(
+      MAX_CHECKOUT_ITEMS,
+      `Cart exceeds limit of ${MAX_CHECKOUT_ITEMS} items`,
+    ),
+});
+
+export type GuestCheckoutQuoteDto = z.infer<typeof GuestCheckoutQuoteSchema>;
