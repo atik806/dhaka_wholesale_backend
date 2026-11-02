@@ -126,8 +126,15 @@ export class ProductsService {
             ? 'rating'
             : 'review_count';
     const ascending = sort === 'price-asc';
+    // The default ("popular") order leads with featured products, so the
+    // shop opens on the lines the store is focusing on (is_featured is set
+    // in admin); everything else follows by popularity.
+    const featuredFirst = sort === 'popular';
     const ordered = (dbQuery: ReturnType<typeof makeQuery>) =>
-      dbQuery
+      (featuredFirst
+        ? dbQuery.order('is_featured', { ascending: false, nullsFirst: false })
+        : dbQuery
+      )
         .order(sortColumn, { ascending, nullsFirst: false })
         .order('id', { ascending: true });
     const from = (page - 1) * limit;
@@ -160,6 +167,8 @@ export class ProductsService {
         ...saleProducts,
       ];
       merged.sort((a, b) => {
+        if (featuredFirst && Boolean(a.is_featured) !== Boolean(b.is_featured))
+          return a.is_featured ? -1 : 1;
         const av = a[sortColumn];
         const bv = b[sortColumn];
         if (av == null && bv != null) return 1;

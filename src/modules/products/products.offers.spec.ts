@@ -24,6 +24,7 @@ describe('Sale catalog filters and pagination', () => {
     original_price: null,
     rating: index % 5,
     review_count: index % 4,
+    is_featured: index % 7 === 0,
     created_at: new Date(index * 1000).toISOString(),
   }));
   let prices: Map<string, number>;
@@ -110,6 +111,9 @@ describe('Sale catalog filters and pagination', () => {
             ? 'rating'
             : 'review_count';
       all.sort((a, b) => {
+        // The default order leads with featured products.
+        if (sort === 'popular' && a.is_featured !== b.is_featured)
+          return a.is_featured ? -1 : 1;
         const comparison = a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0;
         return (
           (sort === 'price-asc' ? comparison : -comparison) ||
