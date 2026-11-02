@@ -27,7 +27,7 @@ export class CheckoutService {
    * Server-side pricing source of truth for checkout.
    * Returns subtotal, zone shipping, tax (0), and total.
    */
-  async quote(userId: string, dto: CheckoutQuoteDto) {
+  async quote(userId: string | undefined, dto: CheckoutQuoteDto) {
     const lines = await this.resolveLines(userId, dto.items);
     const promotion = await this.promotions.apply(
       lines,
@@ -69,7 +69,7 @@ export class CheckoutService {
   }
 
   private async resolveLines(
-    userId: string,
+    userId: string | undefined,
     items?: Array<{
       product_id: string;
       quantity: number;
@@ -80,6 +80,7 @@ export class CheckoutService {
     if (items && items.length > 0) {
       return this.quoteFromItems(items);
     }
+    if (!userId) throw new BadRequestException('Cart is empty');
     return this.quoteFromCart(userId);
   }
 

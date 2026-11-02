@@ -1,8 +1,12 @@
 import { z } from 'zod';
+import { isGuestEmail } from '../../orders/guest-customer.js';
 
 export const RegisterSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters').max(100),
-  email: z.string().email('Invalid email address'),
+  email: z
+    .string()
+    .email('Invalid email address')
+    .refine((email) => !isGuestEmail(email), 'Invalid email address'),
   password: z
     .string()
     .min(8, 'Password must be at least 8 characters')
