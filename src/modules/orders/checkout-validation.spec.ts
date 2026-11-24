@@ -76,6 +76,30 @@ describe('checkout request validation', () => {
   it('accepts a cash-on-delivery order', () => {
     expect(CheckoutOrderSchema.safeParse(order).success).toBe(true);
   });
+
+  it('accepts a single name with no last name, email or postcode', () => {
+    const result = CheckoutOrderSchema.safeParse({
+      ...order,
+      shipping_address: {
+        firstName: 'Rahim Uddin',
+        lastName: '',
+        phone: '01712345678',
+        address: 'House 1, Road 2, Mirpur',
+        city: 'Dhaka',
+      },
+    });
+    expect(result.success).toBe(true);
+    expect(result.data?.shipping_address.lastName).toBe('');
+  });
+
+  it('still requires a name', () => {
+    expect(
+      CheckoutOrderSchema.safeParse({
+        ...order,
+        shipping_address: { ...address, firstName: ' ' },
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe('resolveVariant', () => {

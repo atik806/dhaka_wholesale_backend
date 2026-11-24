@@ -18,7 +18,9 @@ export const BdMobileSchema = z
 
 const ShippingAddressSchema = z.object({
   firstName: z.string().trim().min(1).max(100),
-  lastName: z.string().trim().min(1).max(100),
+  // Optional: the storefront asks for one "name" field and sends it as
+  // firstName, because customers found the long address form tiring.
+  lastName: z.string().trim().max(100).optional().default(''),
   // Optional: most customers order by phone; COD is confirmed by a call.
   email: z
     .union([z.literal(''), z.string().trim().email().max(254)])
